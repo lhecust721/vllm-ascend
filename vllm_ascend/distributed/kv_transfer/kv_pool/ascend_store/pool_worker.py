@@ -161,12 +161,20 @@ class KVPoolWorker:
         self.layerwise_max_transfer_bytes = int(extra_config.get("layerwise_max_transfer_bytes", 0))
 
         logger.info(
-            "use_hybrid: %s, use_mamba: %s, num_kv_cache_groups: %s, hash_block_size: %s, lcm_block_size: %s",
+            "[KVPOOL_WORKER_CONFIG] role=%s consumer_is_to_put=%s backend=%s "
+            "use_hybrid=%s use_mamba=%s num_kv_cache_groups=%s "
+            "grouped_block_size=%s hash_block_size=%s lcm_block_size=%s "
+            "cache_transfer_granularity=%s",
+            self.kv_role,
+            self.consumer_is_to_put,
+            self.backend_name,
             self.use_hybrid,
             self.use_mamba,
             self.num_kv_cache_groups,
+            self.grouped_block_size,
             self.hash_block_size,
             self.lcm_block_size,
+            self.cache_transfer_granularity,
         )
 
     def _init_key_head_config(self, model_config, parallel_config) -> None:
@@ -1367,6 +1375,16 @@ class KVPoolWorker:
         for request in connector_metadata.requests:
             can_save = request.can_save
             if can_save is None or not can_save:
+                logger.debug(
+                    "[KVPOOL_WORKER_SAVE] skip req=%s can_save=%s "
+                    "target_token_len=%s save_start=%s save_end=%s block_hashes=%s",
+                    request.req_id,
+                    can_save,
+                    request.target_token_len,
+                    request.save_start_token,
+                    request.save_end_token,
+                    len(request.block_hashes),
+                )
                 continue
             current_event = torch.npu.Event()
             current_event.record()
@@ -1387,11 +1405,21 @@ class KVPoolWorker:
             )
             has_save_request = True
 
+        logger.debug(
+            "[KVPOOL_WORKER_SAVE] metadata_requests=%s savable_requests=%s sender=%s",
+            len(connector_metadata.requests),
+            sum(bool(request.can_save) for request in connector_metadata.requests),
+            type(self.kv_send_thread).__name__,
+        )
         if has_save_request:
             # vLLM expects wait_for_save() to make stores visible before the
             # request is reported as finished. Without this barrier a following
             # identical prompt can lookup before Mooncake put() has completed.
             self.kv_send_thread.request_queue.join()  # type: ignore[union-attr]
+            logger.debug(
+                "[KVPOOL_WORKER_SAVE] queue_drained savable_requests=%s",
+                sum(bool(request.can_save) for request in connector_metadata.requests),
+            )
 
     def retrieve_layer(
         self,

@@ -273,10 +273,10 @@ class TestKVPoolScheduler(unittest.TestCase):
 
 
 class TestKVPoolSchedulerBuildMeta(unittest.TestCase):
-    def _make_config(self, kv_role="kv_producer", block_size=16):
+    def _make_config(self, kv_role="kv_producer", block_size=16, extra_config=None):
         config = MagicMock()
         config.kv_transfer_config.kv_role = kv_role
-        config.kv_transfer_config.kv_connector_extra_config = {}
+        config.kv_transfer_config.kv_connector_extra_config = extra_config or {}
         config.kv_transfer_config.get_from_extra_config.return_value = True
         config.parallel_config.data_parallel_rank = 0
         config.parallel_config.prefill_context_parallel_size = 1
@@ -409,6 +409,52 @@ class TestKVPoolSchedulerBuildMeta(unittest.TestCase):
 
         _meta = scheduler.build_connector_meta(sched_output)
         self.assertNotIn("r1", scheduler._request_trackers)
+
+    @patch("vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.pool_scheduler.LookupKeyClient")
+    def test_decode_save_advances_tracker_without_new_block_ids(self, mock_client_cls):
+        from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import RequestTracker
+
+        config = self._make_config(
+            kv_role="kv_consumer",
+            extra_config={
+                "consumer_is_to_put": True,
+                "save_decode_cache": True,
+            },
+        )
+        scheduler = KVPoolScheduler(config, use_layerwise=False)
+
+        request = MagicMock()
+        request.num_computed_tokens = 31
+        request.num_prompt_tokens = 16
+        request.prompt_token_ids = list(range(16))
+        request.all_token_ids = list(range(32))
+        request.block_hashes = [b"h0", b"h1"]
+        scheduler._unfinished_requests["r1"] = (request, [[0, 1]])
+        scheduler._unfinished_request_ids.add("r1")
+        scheduler._request_trackers["r1"] = RequestTracker(
+            req_id="r1",
+            token_len=31,
+            allocated_block_ids=[0, 1],
+            num_saved_tokens=16,
+            token_ids=list(range(31)),
+            num_prompt_tokens=16,
+        )
+
+        sched_output = MagicMock()
+        sched_output.finished_req_ids = set()
+        sched_output.preempted_req_ids = set()
+        sched_output.scheduled_new_reqs = []
+        sched_output.num_scheduled_tokens = {"r1": 1}
+        sched_output.scheduled_cached_reqs.req_ids = ["r1"]
+        sched_output.scheduled_cached_reqs.new_block_ids = [[]]
+
+        meta = scheduler.build_connector_meta(sched_output)
+
+        tracker = scheduler._request_trackers["r1"]
+        self.assertEqual(tracker.token_len, 32)
+        self.assertEqual(tracker.num_saved_tokens, 32)
+        self.assertEqual(len(meta.requests), 1)
+        self.assertTrue(meta.requests[0].can_save)
 
 
 class TestLookupKeyClient(unittest.TestCase):

@@ -227,20 +227,32 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
         if not self.use_layerwise:
             return
 
-        if self.kv_role == "kv_consumer":
-            # Don't do save if the role is kv_consumer
+        if self.kv_role == "kv_consumer" and not self.consumer_is_to_put:
+            # A load-only consumer does not publish KV.
             return
         self.connector_worker.save_kv_layer(self._get_connector_metadata())
 
     def wait_for_save(self):
         if self.kv_role == "kv_consumer" and not self.consumer_is_to_put:
             # Don't do save if the role is kv_consumer
+            logger.debug(
+                "[KVPOOL_CONNECTOR_SAVE] skip role=%s consumer_is_to_put=%s",
+                self.kv_role,
+                self.consumer_is_to_put,
+            )
             return
 
         if self.use_layerwise:
             return
 
-        self.connector_worker.wait_for_save(self._get_connector_metadata())
+        metadata = self._get_connector_metadata()
+        logger.debug(
+            "[KVPOOL_CONNECTOR_SAVE] proceed role=%s consumer_is_to_put=%s requests=%s",
+            self.kv_role,
+            self.consumer_is_to_put,
+            len(metadata.requests),
+        )
+        self.connector_worker.wait_for_save(metadata)
 
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         """Get the finished recving and sending requests."""
