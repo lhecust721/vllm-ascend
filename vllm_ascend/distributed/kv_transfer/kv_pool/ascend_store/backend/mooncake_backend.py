@@ -195,44 +195,26 @@ class MooncakeBackend(Backend):
                 config.preferred_segment = self.local_seg
             config.prefer_alloc_in_same_node = self.config.prefer_alloc_in_same_node
             res = self.store.batch_put_from_multi_buffers(keys, addrs, sizes, config)
-            result_codes = [int(value) for value in res]
-            failed_codes = [value for value in result_codes if value < 0]
+            failed_codes = [int(value) for value in res if value < 0]
             failed_count = len(failed_codes)
-            logger.debug(
-                "[KVPOOL_PUT_RESULT] key_count=%d failed_count=%d "
-                "result=%s sample_keys=%s",
-                len(keys),
-                failed_count,
-                result_codes,
-                keys[:3],
-            )
             if failed_count:
                 error_codes = sorted(set(failed_codes))
                 logger.error(
-                    "[KVPOOL_PUT_RESULT] Failed to put %d keys out of %d. "
-                    "error_codes=%s sample_keys=%s. Check memory and store capacity.",
+                    "Failed to put %d keys out of %d. error_codes=%s. Check memory and store capacity.",
                     failed_count,
                     len(keys),
                     error_codes,
-                    keys[:3],
                 )
                 logger.debug("Failed to put key details. keys=%s, result=%s", keys, res)
                 if self._lazy_init:
                     logger.warning("First DSV4(compress) request failure is expected. This is normal behavior.")
-            else:
-                logger.debug(
-                    "[KVPOOL_PUT_RESULT] PUT COMPLETED: success=%d/%d",
-                    len(keys),
-                    len(keys),
-                )
         except Exception as e:
             logger.error(
-                "[KVPOOL_PUT_RESULT] PUT EXCEPTION: key_count=%d "
-                "type=%s error=%s sample_keys=%s. Check store state and memory.",
+                "Failed to put %d keys out of %d. type=%s, error=%s. Check store state and memory.",
+                len(keys),
                 len(keys),
                 type(e).__name__,
                 e,
-                keys[:3],
             )
             logger.debug("Failed to put key details. keys=%s", keys)
             if self._lazy_init:

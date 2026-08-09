@@ -137,21 +137,6 @@ class KVPoolScheduler:
             self._discard_partial_chunks = vllm_config.kv_transfer_config.get_from_extra_config(
                 "discard_partial_chunks", True
             )
-        logger.info(
-            "[KVPOOL_SAVE_CONFIG] role=%s consumer_is_to_put=%s "
-            "save_decode_cache=%s use_hybrid=%s use_compress=%s "
-            "grouped_block_size=%s hash_block_size=%s "
-            "cache_transfer_granularity=%s discard_partial_chunks=%s",
-            self.kv_role,
-            self.consumer_is_to_put,
-            self.save_decode_cache,
-            self.use_hybrid,
-            self.use_compress,
-            self.grouped_block_size,
-            self.hash_block_size,
-            self.cache_transfer_granularity,
-            self._discard_partial_chunks,
-        )
         self._unfinished_requests: dict[str, tuple[Request, list[list[int]]]] = {}
         self._unfinished_request_ids: set[str] = set()
         self._loading_req_ids: set[str] = set()
@@ -849,10 +834,6 @@ class KVPoolScheduler:
             force_skip_save,
         )
 
-    def _is_decoding_request(self, req_id: str) -> bool:
-        req_tuple = self._unfinished_requests.get(req_id)
-        return req_tuple is not None and req_tuple[0].num_computed_tokens >= req_tuple[0].num_prompt_tokens
-
     def _process_running_cached_request(
         self,
         new_block_ids,
@@ -865,14 +846,13 @@ class KVPoolScheduler:
         # Reused buffers must save every step; otherwise only explicit
         # save_decode_cache keeps Decode increments.
         req_tuple = self._unfinished_requests.get(req_id)
-        is_decoding = self._is_decoding_request(req_id)
+        is_decoding = req_tuple is not None and req_tuple[0].num_computed_tokens >= req_tuple[0].num_prompt_tokens
         if is_decoding and not self.save_decode_cache and not self.layerwise_offload:
             return None
         request_tracker = self._request_trackers.get(req_id)
         if request_tracker is None:
             raise ValueError(f"Request {req_id} is not in _request_trackers, but it is scheduled to be cached")
         num_new_tokens = scheduler_output.num_scheduled_tokens[req_id]
-        tracker_token_len_before = request_tracker.token_len
         if req_tuple:
             request = req_tuple[0]
             num_current_tokens = request_tracker.token_len
@@ -909,33 +889,13 @@ class KVPoolScheduler:
                 kvpool_cached_tokens=num_current_tokens,
                 can_load=True,
             )
-        req_meta = self._build_req_meta(
+        return self._build_req_meta(
             request_tracker,
             request.block_hashes,
             load_spec,
             request.prompt_token_ids,
             force_skip_save,
         )
-        if is_decoding:
-            logger.debug(
-                "[KVPOOL_DECODE_SAVE_CHECK] req=%s scheduled_tokens=%s "
-                "new_block_ids=%s tracker_before=%s tracker_after=%s "
-                "block_hashes=%s hash_block_size=%s granularity=%s "
-                "meta_created=%s can_save=%s save_start=%s save_end=%s",
-                req_id,
-                num_new_tokens,
-                bool(new_block_ids),
-                tracker_token_len_before,
-                request_tracker.token_len,
-                len(request.block_hashes),
-                self.hash_block_size,
-                self.cache_transfer_granularity,
-                req_meta is not None,
-                None if req_meta is None else req_meta.can_save,
-                None if req_meta is None else req_meta.save_start_token,
-                None if req_meta is None else req_meta.save_end_token,
-            )
-        return req_meta
 
     def _process_async_load_request(
         self,
@@ -1026,13 +986,7 @@ class KVPoolScheduler:
         if not force_skip_save:
             for i, req_id in enumerate(cached_reqs.req_ids):
                 new_block_ids = cached_reqs.new_block_ids[i]
-                # Most autoregressive Decode steps reuse an existing physical
-                # block, so allocate_slots() supplies no new block IDs. Keep
-                # processing those steps when Decode cache saving is enabled;
-                # otherwise RequestTracker.token_len never reaches the next
-                # transfer boundary and no KV Pool put is emitted.
-                track_decode = self.save_decode_cache and self._is_decoding_request(req_id)
-                if not new_block_ids and not track_decode and not self.tp_mismatch and not self.layerwise_offload:
+                if not new_block_ids and not self.tp_mismatch and not self.layerwise_offload:
                     continue
                 if req_id in self._preempted_req_ids:
                     if not new_block_ids:
