@@ -117,6 +117,21 @@ class KVPoolScheduler:
         self._block_size = self.grouped_block_size[0]
         self.lcm_block_size = math.lcm(*self.grouped_block_size)
         self.cache_transfer_granularity = self._infer_cache_transfer_granularity()
+        granularity_details, granularity_lcm_inputs = self._get_cache_transfer_granularity_details()
+        logger.info(
+            "[KVPOOL_GRANULARITY_CONFIG] source=scheduler "
+            "compress_ratios=%s kv_cache_group_families=%s "
+            "original_block_size=%s grouped_block_size=%s "
+            "hash_block_size=%s group_details=%s lcm_inputs=%s final_lcm=%s",
+            self.compress_ratios,
+            self.kv_cache_group_families,
+            self.original_block_size,
+            self.grouped_block_size,
+            self.hash_block_size,
+            granularity_details,
+            granularity_lcm_inputs,
+            self.cache_transfer_granularity,
+        )
         # request_id -> full_token_ids
         self._request_trackers: dict[str, RequestTracker] = {}
         self._preempted_req_ids: set[str] = set()
@@ -416,16 +431,29 @@ class KVPoolScheduler:
         cache_family = self._get_group_family(self.kv_cache_group_families, group_id)
         return self._get_group_block_size(group_id) * max(infer_cache_family_ratio(cache_family), 1)
 
-    def _infer_cache_transfer_granularity(self) -> int:
-        granularities = [self.lcm_block_size]
+    def _get_cache_transfer_granularity_details(self) -> tuple[list[dict[str, Any]], list[int]]:
+        details: list[dict[str, Any]] = []
+        lcm_inputs = [self.lcm_block_size]
         for group_id in self.kv_cache_group_ids:
-            granularities.append(
-                get_cache_family_granularity(
-                    self._get_group_block_size(group_id),
-                    self._get_group_family(self.kv_cache_group_families, group_id),
-                )
+            block_size = self._get_group_block_size(group_id)
+            cache_family = self._get_group_family(self.kv_cache_group_families, group_id)
+            family_ratio = infer_cache_family_ratio(cache_family)
+            family_granularity = get_cache_family_granularity(block_size, cache_family)
+            lcm_inputs.append(family_granularity)
+            details.append(
+                {
+                    "group_id": group_id,
+                    "block_size": block_size,
+                    "cache_family": cache_family,
+                    "family_ratio": family_ratio,
+                    "family_granularity": family_granularity,
+                }
             )
-        return math.lcm(*granularities)
+        return details, lcm_inputs
+
+    def _infer_cache_transfer_granularity(self) -> int:
+        _, lcm_inputs = self._get_cache_transfer_granularity_details()
+        return math.lcm(*lcm_inputs)
 
     def _floor_to_cache_transfer_granularity(self, token_len: int) -> int:
         return token_len // self.cache_transfer_granularity * self.cache_transfer_granularity

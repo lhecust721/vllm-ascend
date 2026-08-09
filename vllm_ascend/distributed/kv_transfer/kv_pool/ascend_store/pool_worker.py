@@ -156,6 +156,21 @@ class KVPoolWorker:
         self.kv_cache_group_families = self._infer_group_families()
         self.group_uses_align_state = self._infer_group_uses_align_state()
         self.cache_transfer_granularity = self._infer_cache_transfer_granularity()
+        granularity_details, granularity_lcm_inputs = self._get_cache_transfer_granularity_details()
+        logger.info(
+            "[KVPOOL_GRANULARITY_CONFIG] source=worker "
+            "compress_ratios=%s kv_cache_group_families=%s "
+            "original_block_size=%s grouped_block_size=%s "
+            "hash_block_size=%s group_details=%s lcm_inputs=%s final_lcm=%s",
+            self.compress_ratios,
+            self.kv_cache_group_families,
+            self.original_block_size,
+            self.grouped_block_size,
+            self.hash_block_size,
+            granularity_details,
+            granularity_lcm_inputs,
+            self.cache_transfer_granularity,
+        )
         self.h2d_stagger_us = int(extra_config.get("h2d_stagger_us", 0))
         self.layerwise_max_transfer_blocks = int(extra_config.get("layerwise_max_transfer_blocks", 0))
         self.layerwise_max_transfer_bytes = int(extra_config.get("layerwise_max_transfer_bytes", 0))
@@ -547,16 +562,29 @@ class KVPoolWorker:
             return "default"
         return families[group_id]
 
-    def _infer_cache_transfer_granularity(self) -> int:
-        granularities = [self.lcm_block_size]
+    def _get_cache_transfer_granularity_details(self) -> tuple[list[dict[str, Any]], list[int]]:
+        details: list[dict[str, Any]] = []
+        lcm_inputs = [self.lcm_block_size]
         for group_id in range(self.num_kv_cache_groups):
-            granularities.append(
-                get_cache_family_granularity(
-                    self._get_group_block_size(group_id),
-                    self._get_group_family(self.kv_cache_group_families, group_id),
-                )
+            block_size = self._get_group_block_size(group_id)
+            cache_family = self._get_group_family(self.kv_cache_group_families, group_id)
+            family_ratio = infer_cache_family_ratio(cache_family)
+            family_granularity = get_cache_family_granularity(block_size, cache_family)
+            lcm_inputs.append(family_granularity)
+            details.append(
+                {
+                    "group_id": group_id,
+                    "block_size": block_size,
+                    "cache_family": cache_family,
+                    "family_ratio": family_ratio,
+                    "family_granularity": family_granularity,
+                }
             )
-        return math.lcm(*granularities)
+        return details, lcm_inputs
+
+    def _infer_cache_transfer_granularity(self) -> int:
+        _, lcm_inputs = self._get_cache_transfer_granularity_details()
+        return math.lcm(*lcm_inputs)
 
     @staticmethod
     def _uses_hybrid_kv_cache(vllm_config: VllmConfig, kv_cache_config: KVCacheConfig | None) -> bool:
