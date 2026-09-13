@@ -19,6 +19,7 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.backend im
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import (
     ChunkedTokenDatabase,
     GroupedBlockHashCache,
+    get_block_hashes,
     infer_cache_family_ratio,
     LayerBatchReqMeta,
     LayerBlockRange,
@@ -28,6 +29,7 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import
     ReqMeta,
     SharedBlockData,
 )
+from vllm.utils.math_utils import cdiv
 # isort: on
 
 
@@ -750,10 +752,67 @@ class KVCacheStoreSendingThread(KVTransferThread):
                 key_block_ids.append(block_id)
 
             if not keys:
+                # Diagnostics: why did this group produce 0 keys?
+                # expected_chunks mirrors _iter_token_chunks (grouped hashes
+                # capped by token_len / effective block size).
+                expected_chunks = 0
+                if token_len > 0:
+                    grouped = get_block_hashes(
+                        req_meta.block_hashes,
+                        raw_group_block_size,
+                        self.token_database.hash_block_size,
+                        grouped_hash_cache=grouped_hash_cache,
+                    )
+                    expected_chunks = min(len(grouped), cdiv(token_len, raw_group_block_size))
+                if expected_chunks > 0 and len(block_ids) == 0:
+                    # Pathological: chunks exist in range but the tracker
+                    # holds no blocks for this group at all (e.g. c128 group
+                    # on decode side: P->D transferred 0 blocks and no block
+                    # ever reached the tracker).
+                    logger.warning(
+                        "KV pool put skipped group with 0 keys: req=%s group=%d "
+                        "token_len=%d expected_chunks=%d len(block_ids)=0 "
+                        "store_mask_allowed=%s skip_null=%s",
+                        req_id,
+                        group_id,
+                        token_len,
+                        expected_chunks,
+                        (sum(group_store_mask) if group_store_mask is not None else "all"),
+                        skip_null_blocks,
+                    )
+                elif expected_chunks > 0 and len(block_ids) < expected_chunks:
+                    # Tracker covers fewer blocks than chunks: leading chunks
+                    # fall below block_id 0 and get skipped.
+                    logger.debug(
+                        "KV pool put partial coverage: req=%s group=%d token_len=%d "
+                        "expected_chunks=%d len(block_ids)=%d (first %d chunk(s) uncovered)",
+                        req_id,
+                        group_id,
+                        token_len,
+                        expected_chunks,
+                        len(block_ids),
+                        expected_chunks - len(block_ids),
+                    )
+                else:
+                    logger.debug(
+                        "KV pool put group=%d req=%s produced 0 keys for this rank "
+                        "(sharding/mask, token_len=%d, expected_chunks=%d, len(block_ids)=%d)",
+                        group_id,
+                        req_id,
+                        token_len,
+                        expected_chunks,
+                        len(block_ids),
+                    )
                 continue
             exists_states = self.lookup(keys)
             missing_indices = [index for index, exists in enumerate(exists_states) if not exists]
             if not missing_indices:
+                logger.debug(
+                    "KV pool put group=%d req=%s: all %d keys already in store, skip",
+                    group_id,
+                    req_id,
+                    len(keys),
+                )
                 continue
             starts = [starts[index] for index in missing_indices]
             ends = [ends[index] for index in missing_indices]

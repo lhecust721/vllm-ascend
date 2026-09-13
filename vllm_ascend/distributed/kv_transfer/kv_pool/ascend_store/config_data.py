@@ -987,12 +987,24 @@ class ReqMeta:
         discard_partial_chunks: bool = True,
         original_block_size: list[int] | int | None = None,
         kv_cache_group_families: list[str] | None = None,
+        hash_block_size: int | None = None,
     ) -> ReqMeta | None:
         """Create the request metadata from a request tracker."""
         if block_hashes is None:
             block_hashes = []
         target_token_len = tracker.token_len
         previous_saved_tokens = tracker.num_saved_tokens
+
+        # Cap the save length by the request's current hash coverage. The
+        # scheduler may build this metadata at the very step that crosses the
+        # granularity boundary, before the boundary token has been
+        # sampled/hashed (async scheduling lag). Saving past the hash
+        # coverage makes integer division truncate every group's last chunk
+        # and wipes out groups whose single chunk spans the whole granularity
+        # (e.g. c128: len(hashes)//(granularity/hash_block_size) == 0).
+        save_target_len = target_token_len
+        if block_hashes and hash_block_size:
+            save_target_len = min(target_token_len, len(block_hashes) * hash_block_size)
 
         # For save operation: do not save if the following condition is met
         # 1. has already been saved before (num_saved_tokens > 0)
@@ -1003,9 +1015,9 @@ class ReqMeta:
             else 0
         )
         num_tokens_to_save = (
-            (target_token_len // cache_transfer_granularity * cache_transfer_granularity)
+            (save_target_len // cache_transfer_granularity * cache_transfer_granularity)
             if discard_partial_chunks
-            else target_token_len
+            else save_target_len
         )
         full_block_count = target_token_len // cache_transfer_granularity
         boundary_without_hash = (

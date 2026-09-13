@@ -597,9 +597,16 @@ class KVPoolScheduler:
         For SharedStorageConnector, update _request_needs_load
         if the CacheManager this allocated blocks for us.
         """
-        local_block_ids: list[list[int]] = [[] for _ in self.kv_cache_group_ids]
-        if num_external_tokens > 0:
-            local_block_ids = normalize_block_ids_by_group(blocks.get_block_ids())
+        # Always snapshot the FULL per-group block table. Under MultiConnector
+        # the externally loaded tokens are accounted on another sub-connector
+        # (e.g. MooncakeHybridConnector), so this connector sees
+        # num_external_tokens == 0 while `blocks` still carries the complete
+        # table including externally loaded blocks. Storing it unconditionally
+        # lets _process_new_request seed the tracker with the full table.
+        if blocks is not None:
+            local_block_ids: list[list[int]] = normalize_block_ids_by_group(blocks.get_block_ids())
+        else:
+            local_block_ids = [[] for _ in self.kv_cache_group_ids]
 
         self._unfinished_requests[request.request_id] = (request, local_block_ids)
         self._unfinished_request_ids.add(request.request_id)
@@ -705,6 +712,7 @@ class KVPoolScheduler:
             discard_partial_chunks=self._discard_partial_chunks,
             original_block_size=self.original_block_size,
             kv_cache_group_families=self.kv_cache_group_families,
+            hash_block_size=self.hash_block_size,
         )
 
     def _process_new_request(
@@ -721,7 +729,19 @@ class KVPoolScheduler:
                 f"Request {request.req_id} is not in _unfinished_requests, but it is scheduled as a new request"
             )
         request_real = request_tuple[0]
-        block_ids_by_group = normalize_block_ids_by_group(request.block_ids)
+        # Seed the tracker with the FULL block table snapshot taken in
+        # update_state_after_alloc (includes P->D externally loaded blocks).
+        # NewRequestData.block_ids only contains blocks newly allocated in the
+        # first scheduled step; seeding from it would leave externally loaded
+        # blocks (e.g. chunk-0 of compressed groups) permanently outside the
+        # tracker, and the put side silently skips those chunks.
+        full_block_table = request_tuple[1]
+        if any(full_block_table):
+            block_ids_by_group = [list(group) for group in full_block_table]
+            seed_source = "full_table"
+        else:
+            block_ids_by_group = normalize_block_ids_by_group(request.block_ids)
+            seed_source = "first_step_new_blocks"
         previous_tracker = self._request_trackers.get(request.req_id)
         request_tracker = RequestTracker(
             req_id=request.req_id,
@@ -738,6 +758,13 @@ class KVPoolScheduler:
             block_sizes=self.grouped_block_size,
         )
         self._request_trackers[request.req_id] = request_tracker
+        logger.debug(
+            "KV pool tracker seed req=%s source=%s groups_len=%s token_len=%d",
+            request.req_id,
+            seed_source,
+            [len(group) for group in block_ids_by_group],
+            num_tokens_to_compute,
+        )
         num_blocks = num_tokens_to_compute // self.hash_block_size
         has_last_block = num_tokens_to_compute % self._block_size != 0
         self._allocate_gva_if_needed(
@@ -852,7 +879,15 @@ class KVPoolScheduler:
             if last_block_key is not None:
                 request_tracker.last_block_key = last_block_key
         if new_block_ids is not None:
+            normalized_new_blocks = normalize_block_ids_by_group(new_block_ids)
             request_tracker.update(new_block_ids)
+            if any(len(group) > 0 for group in normalized_new_blocks):
+                logger.debug(
+                    "KV pool tracker update req=%s token_len=%d groups_len=%s",
+                    req_id,
+                    request_tracker.token_len,
+                    [len(group) for group in request_tracker.allocated_block_ids_by_group],
+                )
         load_spec = None
         return self._build_req_meta(
             request_tracker,
@@ -908,6 +943,7 @@ class KVPoolScheduler:
             discard_partial_chunks=self._discard_partial_chunks,
             original_block_size=self.original_block_size,
             kv_cache_group_families=self.kv_cache_group_families,
+            hash_block_size=self.hash_block_size,
         )
 
     def build_connector_meta(self, scheduler_output: SchedulerOutput) -> KVConnectorMetadata:
@@ -950,7 +986,7 @@ class KVPoolScheduler:
         if not force_skip_save:
             for i, req_id in enumerate(cached_reqs.req_ids):
                 new_block_ids = cached_reqs.new_block_ids[i]
-                if not new_block_ids:
+                if not new_block_ids and not self.save_decode_cache:
                     continue
                 if req_id in self._preempted_req_ids:
                     req_meta = self._process_preempted_cached_request(
