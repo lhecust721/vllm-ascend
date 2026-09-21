@@ -1,0 +1,72 @@
+[W921 00:58:54.222920690 FunctionLoader.cpp:48] Warning: LD_PRELOAD detected, FunctionLoader prefers RTLD_DEFAULT for symbol resolution. (function operator())
+[2026-09-21 00:59:03,321] [ais_bench] [[32mINFO[0m] Current exp folder: /workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845
+[2026-09-21 00:59:03,374] [ais_bench] [[32mINFO[0m] Starting inference tasks...
+[2026-09-21 00:59:03,376] [ais_bench] [[32mINFO[0m] Partitioned into 1 tasks.
+[2026-09-21 00:59:03,376] [ais_bench] [[32mINFO[0m] Merging datasets with the same model and inferencer...
+[?1049h[22;0;0t[1;24r(B[m[4l[?7h[?25l[24;1H[?12l[?25h[?1049l[23;0;0t[?1l>[2026-09-21 00:59:03,430] [ais_bench] [[33mWARNING[0m] Can't set cursor because of endwin() returned ERR, running in background mode
+[2026-09-21 00:59:03,430] [ais_bench] [[32mINFO[0m] Launch TasksMonitor, PID: 23076, Refresh interval: 0.5, Run in background: True
+Monitoring tasks progress:   0%|          | 0/1 [00:00<?, ?it/s][2026-09-21 00:59:03,432] [ais_bench] [[33mWARNING[0m] Failed to read status file '/workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845/status_tmp/tmp_glm52-w4a8-prefixcache-nonthink_sharegpt-prefixcache.json': [Errno 2] No such file or directory: '/workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845/status_tmp/tmp_glm52-w4a8-prefixcache-nonthink_sharegpt-prefixcache.json'. Attempting to clear and continuing.
+Monitoring tasks progress: 100%|██████████| 1/1 [44:18<00:00, 2658.40s/it]Monitoring tasks progress: 100%|██████████| 1/1 [44:18<00:00, 2658.40s/it]
+[2026-09-21 01:43:24,420] [ais_bench] [[32mINFO[0m] Inference tasks completed.
+[2026-09-21 01:43:24,422] [ais_bench] [[32mINFO[0m] Summarizing performance results...
+Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:00<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:01<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:02<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:02<?, ?it/s]Calculating performance details:   0%|          | 0/74 [00:02<?, ?it/s]Calculating performance details: 100%|██████████| 74/74 [00:02<00:00, 31.99it/s]Calculating performance details: 100%|██████████| 74/74 [00:02<00:00, 30.66it/s]Calculating performance details: 100%|██████████| 74/74 [00:02<00:00, 30.65it/s]
+[2026-09-21 01:43:29,362] [ais_bench] [[32mINFO[0m] Visualization in multi-turn conversations...
+/usr/local/python3.12.13/lib/python3.12/site-packages/plotly/offline/offline.py:150: UserWarning: 
+Unrecognized config options supplied: ['showLink']
+  warnings.warn(
+[2026-09-21 01:43:29,608] [ais_bench] [[32mINFO[0m] Request timeline and concurrency chart saved to /workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845/performances/glm52-w4a8-prefixcache-nonthink/sharegpt-prefixcache_plot.html
+[2026-09-21 01:43:29,608] [ais_bench] [[32mINFO[0m] The sharegpt-prefixcache_plot has been saved in /workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845/performances/glm52-w4a8-prefixcache-nonthink/sharegpt-prefixcache_plot.html
+[2026-09-21 01:43:29,611] [ais_bench] [[32mINFO[0m] Converting performance results for stage...
+[2026-09-21 01:43:29,612] [ais_bench] [[32mINFO[0m] Performance results conversion completed!
+[2026-09-21 01:43:29,612] [ais_bench] [[32mINFO[0m] Starting metrics calculation...
+[2026-09-21 01:43:29,622] [ais_bench] [[32mINFO[0m] Starting common metrics calculation...
+[2026-09-21 01:43:29,622] [ais_bench] [[32mINFO[0m] Adding units to metrics...
+[2026-09-21 01:43:29,623] [ais_bench] [[32mINFO[0m] Performance data calculation completed!
+[2026-09-21 01:43:29,624] [ais_bench] [[32mINFO[0m] Performance Results of task [glm52-w4a8-prefixcache-nonthink/sharegpt-prefixcache]: 
+╒══════════════════════════╤═════════╤═════════════════╤════════════════╤══════════════════╤════════════════╤═════════════════╤══════════════════╤═════════════════╤═════╕
+│ Performance Parameters   │ Stage   │ Average         │ Min            │ Max              │ Median         │ P75             │ P90              │ P99             │  N  │
+╞══════════════════════════╪═════════╪═════════════════╪════════════════╪══════════════════╪════════════════╪═════════════════╪══════════════════╪═════════════════╪═════╡
+│ E2EL                     │ total   │ 389898.6 ms     │ 7244.4 ms      │ 1505377.0 ms     │ 199975.2 ms    │ 664123.4 ms     │ 864322.6 ms      │ 1472262.9 ms    │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ TTFT                     │ total   │ 158583.9 ms     │ 3611.9 ms      │ 663453.0 ms      │ 133044.2 ms    │ 203329.5 ms     │ 518651.4 ms      │ 638031.5 ms     │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ TPOT                     │ total   │ 396.4 ms        │ 0.0 ms         │ 2395.5 ms        │ 282.2 ms       │ 686.5 ms        │ 908.5 ms         │ 1480.5 ms       │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ ITL                      │ total   │ 741.1 ms        │ 0.0 ms         │ 17735.3 ms       │ 559.4 ms       │ 574.9 ms        │ 596.3 ms         │ 6506.7 ms       │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ InputTokens              │ total   │ 792.1216        │ 13.0           │ 2486.0           │ 954.0          │ 1194.75         │ 1613.4           │ 2338.54         │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ OutputTokens             │ total   │ 311.1081        │ 0.0            │ 1024.0           │ 4.5            │ 692.5           │ 1024.0           │ 1024.0          │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ OutputTokenThroughput    │ total   │ 0.5003 token/s  │ 0.0 token/s    │ 1.6929 token/s   │ 0.0304 token/s │ 1.0244 token/s  │ 1.5463 token/s   │ 1.6548 token/s  │ 74  │
+├──────────────────────────┼─────────┼─────────────────┼────────────────┼──────────────────┼────────────────┼─────────────────┼──────────────────┼─────────────────┼─────┤
+│ PrefillTokenThroughput   │ total   │ 47.0911 token/s │ 0.0207 token/s │ 582.2156 token/s │ 5.7184 token/s │ 23.9238 token/s │ 131.8358 token/s │ 497.351 token/s │ 74  │
+╘══════════════════════════╧═════════╧═════════════════╧════════════════╧══════════════════╧════════════════╧═════════════════╧══════════════════╧═════════════════╧═════╛
+╒═════════════════════════╤═════════╤═════════════════╕
+│ Common Metric           │ Stage   │ Value           │
+╞═════════════════════════╪═════════╪═════════════════╡
+│ Benchmark Duration      │ total   │ 2609643.5453 ms │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Total Requests          │ total   │ 74              │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Failed Requests         │ total   │ 0               │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Success Requests        │ total   │ 74              │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Concurrency             │ total   │ 11.0561         │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Max Concurrency         │ total   │ 20              │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Request Throughput      │ total   │ 0.0284 req/s    │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Total Input Tokens      │ total   │ 58617           │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Total Generated Tokens  │ total   │ 23022           │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Input Token Throughput  │ total   │ 22.4617 token/s │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Output Token Throughput │ total   │ 8.8219 token/s  │
+├─────────────────────────┼─────────┼─────────────────┤
+│ Total Token Throughput  │ total   │ 31.2836 token/s │
+╘═════════════════════════╧═════════╧═════════════════╛[2026-09-21 01:43:29,630] [ais_bench] [[32mINFO[0m] Performance Result files located in /workspace/outputs/perf_glm52_prefixcache_multiturn_nonthink/20260921_005845/performances/glm52-w4a8-prefixcache-nonthink.
+
