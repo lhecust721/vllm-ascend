@@ -15,6 +15,7 @@ from vllm.v1.core.kv_cache_utils import BlockHash, BlockHashList
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheConfig, MambaSpec, UniformTypeKVCacheSpecs
 
 from vllm_ascend.core.kv_cache_interface import is_prefix_cacheable
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import apply_cache_prefix
 
 if TYPE_CHECKING:
     from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.layerwise.metadata import LayerPoolKey
@@ -133,6 +134,7 @@ class KeyMetadata:
     cache_role: str = "kv"
     """ Family name for compress-aware hybrid cache layouts """
     cache_family: str = "default"
+    cache_prefix: str = ""
 
 
 @dataclass(order=True)
@@ -143,6 +145,7 @@ class PoolKey:
     def __hash__(self):
         return hash(
             (
+                self.key_metadata.cache_prefix,
                 self.key_metadata.model_name,
                 self.key_metadata.head_or_tp_rank,
                 self.key_metadata.dcp_rank,
@@ -155,7 +158,7 @@ class PoolKey:
         )
 
     def to_string(self):
-        return (
+        key = (
             f"{self.key_metadata.model_name}"
             f"@dcp:{self.key_metadata.dcp_rank}"
             f"@head_or_tp_rank:{self.key_metadata.head_or_tp_rank}"
@@ -165,6 +168,7 @@ class PoolKey:
             f"@cache_family:{self.key_metadata.cache_family}"
             f"@{self.chunk_hash}"
         )
+        return apply_cache_prefix(key, self.key_metadata.cache_prefix)
 
     def split_layers(self, num_layers: int, layer_offset: int = 0) -> list[LayerPoolKey]:
         """Split the key into multiple keys for each layer"""
@@ -373,6 +377,7 @@ class ChunkedTokenDatabase:
                 f"@cache_role:{cache_role}"
                 f"@cache_family:{cache_family}@"
             )
+            prefix = apply_cache_prefix(prefix, group_metadata.cache_prefix)
             self._key_prefix_cache[cache_key] = prefix
         return prefix
 
@@ -427,6 +432,7 @@ class ChunkedTokenDatabase:
                 kv_cache_group_id=kv_cache_group_id,
                 cache_role=cache_role,
                 cache_family=cache_family,
+                cache_prefix=group_metadata.cache_prefix,
             ),
             chunk_hash,
         )
@@ -710,9 +716,9 @@ class ChunkedTokenDatabase:
             start = 0
             for j, part in enumerate(self.partitions):
                 end = len(addr_list) if j == len(self.partitions) - 1 else start + part * caches_per_layer
-                new_str = key[i].replace(  # type: ignore[attr-defined]
-                    "@pp_rank:0", f"@pp_rank:{j}", 1
-                )
+                cache_prefix = self.metadata[kv_cache_group_id].cache_prefix
+                prefix_len = len(cache_prefix) + 1 if cache_prefix else 0
+                new_str = key[i][:prefix_len] + key[i][prefix_len:].replace("@pp_rank:0", f"@pp_rank:{j}", 1)
                 new_key.append(new_str)
                 new_addr.append(addr_list[start:end])
                 new_size.append(size_list[start:end])

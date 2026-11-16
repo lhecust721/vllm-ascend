@@ -21,6 +21,7 @@ from vllm.v1.request import Request
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend import (
     resolve_backend,
 )
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import resolve_cache_prefix
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.coordinator import AscendStoreCoordinator
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.in_flight_save_blocks import InFlightSaveBlockTracker
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.lookup_key import LookupKeyClient
@@ -58,6 +59,7 @@ class BaseKVPoolScheduler(ABC):
         kv_cache_config: KVCacheConfig | None = None,
     ):
         self.vllm_config = vllm_config
+        self.cache_prefix = resolve_cache_prefix(vllm_config, kv_cache_config)
         self.use_layerwise = use_layerwise
         self.kv_cache_config = kv_cache_config
         extra_config = vllm_config.kv_transfer_config.kv_connector_extra_config

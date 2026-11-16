@@ -32,6 +32,7 @@ from vllm_ascend.core.kv_cache_placement import map_kvpp_layers_to_owners
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend import (
     backend_map,
 )
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import resolve_cache_prefix
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.coordinator import AscendStoreCoordinator
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.kv_transfer import (
     KVCacheStoreBatch,
@@ -87,6 +88,7 @@ class BaseKVPoolWorker(ABC):
         parallel_config = vllm_config.parallel_config
         extra_config = vllm_config.kv_transfer_config.kv_connector_extra_config
         self.vllm_config = vllm_config
+        self.cache_prefix = resolve_cache_prefix(vllm_config, kv_cache_config)
         self.use_recoverssm = getattr(vllm_config.cache_config, "use_kda_recoverssm", False) is True
         self.use_kvpp = KVPPConfig.from_vllm_config(vllm_config).size > 1
         self.kv_cache_config = kv_cache_config
@@ -344,6 +346,7 @@ class BaseKVPoolWorker(ABC):
                     self.dcp_rank,
                     self.pp_rank,
                     group_id,
+                    cache_prefix=self.cache_prefix,
                 )
             )
 
@@ -1032,10 +1035,10 @@ class BaseKVPoolWorker(ABC):
             return self.tp_size
         return min(self.tp_size, self._get_group_num_kv_heads(kv_cache_group_id))
 
-    @staticmethod
-    def _replace_key_field(key: str, field: str, value: int) -> str:
+    def _replace_key_field(self, key: str, field: str, value: int) -> str:
         marker = f"@{field}:"
-        start = key.find(marker)
+        cache_prefix = getattr(self, "cache_prefix", "")
+        start = key.find(marker, len(cache_prefix) + 1 if cache_prefix else 0)
         if start < 0:
             return key
         value_start = start + len(marker)
