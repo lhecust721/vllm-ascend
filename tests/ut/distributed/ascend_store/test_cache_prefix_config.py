@@ -22,7 +22,7 @@ if not _MOCK_VLLM_DEPS:
     from vllm.distributed.kv_transfer.kv_connector.v1.mooncake.store.worker import _resolve_cache_prefix
     from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheGroupSpec, UniformTypeKVCacheSpecs
 
-    from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import resolve_cache_prefix
+    from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import resolve_cache_prefix
 
 
 def make_config(model_path, prefix="auto", **kwargs):
@@ -107,7 +107,7 @@ class TestRealCachePrefixConfig(unittest.TestCase):
         code = (
             "import sys; "
             "from tests.ut.distributed.ascend_store.test_cache_prefix_config import make_config; "
-            "from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import resolve_cache_prefix; "
+            "from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import resolve_cache_prefix; "
             "print('PREFIX_RESULT=' + resolve_cache_prefix(make_config(sys.argv[1])))"
         )
         result = subprocess.run(

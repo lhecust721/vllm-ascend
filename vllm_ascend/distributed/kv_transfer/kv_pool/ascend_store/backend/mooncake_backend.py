@@ -27,8 +27,10 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.base impor
     set_scheduler_device,
 )
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.layerwise_keys import LayerwiseKeyBuilder
-from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import resolve_cache_prefix
-from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import get_sharded_mamba_group_ids
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import (
+    get_sharded_mamba_group_ids,
+    resolve_cache_prefix,
+)
 from vllm_ascend.distributed.kv_transfer.utils.mooncake_transfer_engine import global_te
 from vllm_ascend.distributed.parallel_state import get_global_rank
 

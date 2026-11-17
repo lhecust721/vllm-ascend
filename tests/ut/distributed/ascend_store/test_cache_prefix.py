@@ -18,7 +18,7 @@ import tests.ut.distributed.ascend_store._mock_deps  # noqa: F401
 from vllm.v1.kv_cache_interface import FullAttentionSpec, KVCacheGroupSpec, UniformTypeKVCacheSpecs
 
 from tests.ut.distributed.ascend_store.test_pool_worker import make_worker
-from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store import cache_prefix
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store import metadata
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.memcache_backend import MemcacheBackend
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.mooncake_backend import MooncakeBackend
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.kv_transfer import (
@@ -56,13 +56,13 @@ def config_for(prefix="", backend="mooncake"):
 class TestCachePrefixResolution(unittest.TestCase):
     def setUp(self):
         self.env = SimpleNamespace(VLLM_IMAGE_TAG="image-v1", VLLM_BUILD_COMMIT="commit-v1")
-        env_patch = patch.object(cache_prefix, "envs", self.env)
+        env_patch = patch.object(metadata, "envs", self.env)
         env_patch.start()
         self.addCleanup(env_patch.stop)
         # Keep these tests independent of a vLLM installation; also inspect
         # the exact factors passed to the maintained upstream hash helper.
         hash_patch = patch.object(
-            cache_prefix,
+            metadata,
             "hash_factors",
             side_effect=lambda factors: hashlib.sha256(json.dumps(factors, sort_keys=True).encode()).hexdigest(),
         )
@@ -73,7 +73,7 @@ class TestCachePrefixResolution(unittest.TestCase):
         self.env.VLLM_IMAGE_TAG = self.env.VLLM_BUILD_COMMIT = ""
         for prefix in ("", "release-v2", "AUTO"):
             with self.subTest(prefix=prefix):
-                self.assertEqual(cache_prefix.resolve_cache_prefix(config_for(prefix)), prefix)
+                self.assertEqual(metadata.resolve_cache_prefix(config_for(prefix)), prefix)
         self.hash_factors.assert_not_called()
 
     def test_non_mooncake_rejects_nonempty_prefix_before_accessing_model(self):
@@ -82,49 +82,49 @@ class TestCachePrefixResolution(unittest.TestCase):
                 config = config_for(prefix, backend)
                 del config.model_config
                 with self.subTest(backend=backend, prefix=prefix), self.assertRaisesRegex(ValueError, "only.*Mooncake"):
-                    cache_prefix.resolve_cache_prefix(config)
-            self.assertEqual(cache_prefix.resolve_cache_prefix(config_for("", backend)), "")
+                    metadata.resolve_cache_prefix(config)
+            self.assertEqual(metadata.resolve_cache_prefix(config_for("", backend)), "")
         self.hash_factors.assert_not_called()
 
     def test_upstream_string_coercion_and_omitted_default(self):
         for value, expected in ((None, "None"), (False, "False"), (0, "0"), ([], "[]"), ({}, "{}")):
             with self.subTest(value=value):
-                self.assertEqual(cache_prefix.resolve_cache_prefix(config_for(value)), expected)
+                self.assertEqual(metadata.resolve_cache_prefix(config_for(value)), expected)
                 for backend in ("memcache", "yuanrong"):
                     with self.assertRaisesRegex(ValueError, "only.*Mooncake"):
-                        cache_prefix.resolve_cache_prefix(config_for(value, backend))
+                        metadata.resolve_cache_prefix(config_for(value, backend))
         config = config_for()
         del config.kv_transfer_config.kv_connector_extra_config["cache_prefix"]
-        self.assertEqual(cache_prefix.resolve_cache_prefix(config), "")
+        self.assertEqual(metadata.resolve_cache_prefix(config), "")
         self.hash_factors.assert_not_called()
 
     def test_auto_factors_and_image_precedence(self):
         config = config_for("auto")
-        original = cache_prefix.resolve_cache_prefix(config)
+        original = metadata.resolve_cache_prefix(config)
         self.assertTrue(original.startswith("auto-"))
         self.hash_factors.assert_called_with(
             {"build": "image-v1", "model": "model-v1", "hf_commit": "hf-v1", "cache": "32:bfloat16"}
         )
         self.env.VLLM_BUILD_COMMIT = "commit-v2"
-        self.assertEqual(original, cache_prefix.resolve_cache_prefix(config))
+        self.assertEqual(original, metadata.resolve_cache_prefix(config))
         self.env.VLLM_IMAGE_TAG = "image-v2"
-        self.assertNotEqual(original, cache_prefix.resolve_cache_prefix(config))
+        self.assertNotEqual(original, metadata.resolve_cache_prefix(config))
 
     def test_commit_fallback_and_missing_build(self):
         config = config_for("auto")
         for image in ("", "local/vllm-openai:dev"):
             self.env.VLLM_IMAGE_TAG = image
-            self.assertTrue(cache_prefix.resolve_cache_prefix(config).startswith("auto-"))
+            self.assertTrue(metadata.resolve_cache_prefix(config).startswith("auto-"))
             self.assertEqual(self.hash_factors.call_args.args[0]["build"], "commit-v1")
             for commit in ("", "unknown"):
                 self.env.VLLM_BUILD_COMMIT = commit
                 with self.assertRaisesRegex(ValueError, "VLLM_IMAGE_TAG or VLLM_BUILD_COMMIT"):
-                    cache_prefix.resolve_cache_prefix(config)
+                    metadata.resolve_cache_prefix(config)
             self.env.VLLM_BUILD_COMMIT = "commit-v1"
 
     def test_model_hf_and_cache_identity_changes_isolate(self):
         config = config_for("auto")
-        original = cache_prefix.resolve_cache_prefix(config)
+        original = metadata.resolve_cache_prefix(config)
         for field in ("model", "hf", "cache"):
             other = deepcopy(config)
             if field == "model":
@@ -134,9 +134,9 @@ class TestCachePrefixResolution(unittest.TestCase):
             else:
                 other.cache_config.cache_dtype = "int8"
             with self.subTest(field=field):
-                self.assertNotEqual(original, cache_prefix.resolve_cache_prefix(other))
+                self.assertNotEqual(original, metadata.resolve_cache_prefix(other))
         config.scheduler_config = SimpleNamespace(max_num_seqs=8, max_num_batched_tokens=4096)
-        self.assertEqual(original, cache_prefix.resolve_cache_prefix(config))
+        self.assertEqual(original, metadata.resolve_cache_prefix(config))
 
     def test_resolved_groups_normalize_scheduler_worker_without_mutation(self):
         spec = FullAttentionSpec(block_size=16, num_kv_heads=1, head_size=1, dtype="bfloat16")
@@ -148,8 +148,8 @@ class TestCachePrefixResolution(unittest.TestCase):
         scheduler_config = deepcopy(worker_config)
         scheduler_config.cache_config.block_size = 16
         self.assertEqual(
-            cache_prefix.resolve_cache_prefix(worker_config, groups),
-            cache_prefix.resolve_cache_prefix(scheduler_config, groups),
+            metadata.resolve_cache_prefix(worker_config, groups),
+            metadata.resolve_cache_prefix(scheduler_config, groups),
         )
         self.assertEqual(worker_config.cache_config.block_size, 32)
         self.assertEqual(scheduler_config.cache_config.block_size, 16)
@@ -244,8 +244,8 @@ class TestCachePrefixKeys(unittest.TestCase):
 
     def test_auto_prefix_is_used_by_bulk_and_layerwise_workers(self):
         with (
-            patch.object(cache_prefix, "envs", SimpleNamespace(VLLM_IMAGE_TAG="image-v1", VLLM_BUILD_COMMIT="")),
-            patch.object(cache_prefix, "hash_factors", return_value="fingerprint"),
+            patch.object(metadata, "envs", SimpleNamespace(VLLM_IMAGE_TAG="image-v1", VLLM_BUILD_COMMIT="")),
+            patch.object(metadata, "hash_factors", return_value="fingerprint"),
         ):
             for layerwise in (False, True):
                 worker = make_worker(self, use_layerwise=layerwise, extra_config={"cache_prefix": "auto"})

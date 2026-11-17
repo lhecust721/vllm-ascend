@@ -2,7 +2,7 @@
 
 记录日期：2026-11-17。
 本文说明 `lhecust721/vllm-ascend` 的 `codex/ascend-store-cache-prefix` 功能分支，
-覆盖当前实现及与本文一并提交的验证脚本正向对照修正。
+覆盖当前实现，包括两端 kv_both、layerwise 验证及共享函数归并。
 精确版本以包含本文的 Git 提交为准；测试记录不代表 A2 NPU 验收已经完成。
 
 ## 1. 目标、范围与版本
@@ -57,7 +57,8 @@ Memcache/Yuanrong 在转换后检查是否非空，因此上述非空转换结�
 
 ### 2.2 自动前缀
 
-`resolve_cache_prefix()` 复用上游维护的配置哈希，不扫描任意环境变量，也不读取完整权重文件：
+已有 `metadata.py` 中的 `resolve_cache_prefix()` 复用上游维护的配置哈希，
+不扫描任意环境变量，也不读取完整权重文件：
 
 1. 优先选择有效的 `VLLM_IMAGE_TAG`，否则使用 `VLLM_BUILD_COMMIT`。
 2. 排除默认开发身份 `local/vllm-openai:dev` 和 `unknown`；均不可用时在 Store setup 前失败。
@@ -108,7 +109,7 @@ layerwise 外部 reset 仍不支持。滚动升级使用新前缀可以避免全
 
 | 文件 | 类/函数 | 修改目的 |
 |---|---|---|
-| `cache_prefix.py`（新增） | `resolve_cache_prefix`、`apply_cache_prefix` | 统一配置转换、backend 限制、自动身份解析及单次拼接 |
+| `metadata.py`（已有文件） | `resolve_cache_prefix`、`apply_cache_prefix` | 统一配置转换、backend 限制、自动身份解析及单次拼接 |
 | `pool_worker.py` | `BaseKVPoolWorker.__init__`、`_init_metadata` | 初始化解析前缀并传入每个 group 的 metadata |
 | `pool_worker.py` | `_replace_key_field` | PP/TP 等字段重写避开前缀内容 |
 | `pool_scheduler.py` | `BaseKVPoolScheduler.__init__` | 初始化阶段验证配置，尽早拒绝不支持的前缀配置 |
@@ -118,6 +119,12 @@ layerwise 外部 reset 仍不支持。滚动升级使用新前缀可以避免全
 | `layerwise/metadata.py` | `LayerPoolKey.__hash__`、`to_string` | 层级 key 保留命名空间 |
 | `backend/layerwise_keys.py` | `LayerwiseKeyBuilder.make_full_key`、`make_hit_check_keys` | writer key 与 scheduler 查询 key 共用同一前缀机制 |
 | `backend/mooncake_backend.py` | `MooncakeBackend.bind_layerwise_keys` | 将解析出的前缀绑定到单组/hybrid layerwise builder |
+
+前缀相关函数已合并到已有 `metadata.py`，独立的 `cache_prefix.py` 已删除。
+worker、scheduler、普通 key 和 layerwise builder 均从该共享模块访问相关函数。
+Ascend 的多个组件都需解析/拼接前缀，合并到已有 metadata 层可避免 scheduler/backend 反向导入 worker。
+本次归并只调整函数位置和导入路径，保留原函数体、key 格式、自动哈希因素及 reset 范围。
+测试中的 patch 目标与真实配置测试的子进程导入同步改为 metadata；客户端验证脚本的调用参数不变。
 
 没有新增 monkey patch、model runner 行为、NPU 算子或 Ascend 环境变量。
 已有 `VLLM_IMAGE_TAG`/`VLLM_BUILD_COMMIT` 通过 `vllm.envs` 访问。
@@ -337,6 +344,8 @@ A2 的 SDK、Master、驱动、CANN、模型和相关配置必须随结果记录
 | 验证层次 | 结果和边界 |
 |---|---|
 | Windows 核心 CPU/mock 回归（第一轮补强） | 267 passed、189 subtests passed；4 skipped、1 deselected |
+| 共享函数归并后的 Windows CPU/mock 回归 | 271 passed、191 subtests passed；4 skipped、1 deselected；含配对客户端用例 |
+| 函数归并等价检查 | 移动前后的 apply_cache_prefix/resolve_cache_prefix AST 一致，独立文件已删除，无旧模块导入残留 |
 | 4 个 skip | 真实 vLLM 配置测试；Windows 无依赖时明确跳过，不能计为配置兼容性通过 |
 | 1 个 deselect | 原有 FakeMamba 非 dataclass 限制；A2 真实依赖环境不要沿用排除条件 |
 | 最新配对客户端及探针回归 | 8 passed、4 subtests passed，模拟 HTTP 双服务，不是 NPU 推理 |

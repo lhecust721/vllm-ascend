@@ -6,7 +6,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.cache_prefix import apply_cache_prefix
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import apply_cache_prefix
 
 
 @dataclass(frozen=True)
