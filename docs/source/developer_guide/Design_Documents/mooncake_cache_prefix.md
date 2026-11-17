@@ -146,14 +146,42 @@ CPU 字节回环使用 SDK 边界替身，并运行实际 key/connector/backend 
 ## 5. 已部署模型的验证方法
 
 当前由用户部署模型。客户端不启动或停止服务，不部署权重，不修改服务的 cache_prefix。
+验证脚本已提交在
+[`tests/e2e/common/kv_pool/cache_prefix_probe.py`](../../../../tests/e2e/common/kv_pool/cache_prefix_probe.py)。
+配对客户端回归位于
+[`tests/ut/distributed/ascend_store/test_cache_prefix_pair.py`](../../../../tests/ut/distributed/ascend_store/test_cache_prefix_pair.py)。
+下述命令在仓库根目录执行；也可单独复制验证脚本，仅安装其两个客户端依赖后执行。
 
 ### 5.1 服务约束
 
 | 实例 | 要求 |
 |---|---|
-| writer | 允许写入，例如 kv_producer/kv_both；测试期间保持存活 |
-| reader | 建议 kv_consumer；consumer_is_to_load=true、consumer_is_to_put=false、save_decode_cache=false |
+| writer（实例 A） | 本文配置 kv_both，允许查询、加载和写入；测试期间保持存活 |
+| reader（实例 B） | 同样配置 kv_both，允许查询、加载和写入 |
 | 两端 | 使用本分支的 Mooncake backend；共享 master/tenant；关闭本地 prefix caching；没有其他请求干扰 |
+
+writer/reader 是客户端“先请求 A、再请求 B”的顺序标签，不是必须使用的服务角色。
+两个实例都可为 PD 混部节点。kv_both 不需要通过 consumer_is_to_load 打开查询；
+若另选 kv_consumer 才需 consumer_is_to_load=true，并可关闭 consumer_is_to_put/save_decode_cache。
+
+普通路径中，实例 A 的 kv-transfer-config 示例：
+
+```json
+{
+  "kv_connector": "AscendStoreConnector",
+  "kv_role": "kv_both",
+  "kv_load_failure_policy": "fail",
+  "kv_connector_extra_config": {
+    "backend": "mooncake",
+    "lookup_rpc_port": "0",
+    "use_layerwise": false,
+    "cache_prefix": "model-weights-v1"
+  }
+}
+```
+
+实例 B 同样使用 kv_both，将 lookup_rpc_port 改为 "1"；共享测试保持相同前缀，隔离测试改为新前缀。
+两个实例均具有查询能力，不等于每次请求都发生外部 GET；验收以外部命中和实际加载证据为准。
 
 两个实例不一定需要两台物理服务器，但都必须正常接受推理请求并同时存活。
 writer 退出可能使其贡献内存上的对象消失，导致错误归因。
@@ -194,6 +222,8 @@ python tests/e2e/common/kv_pool/cache_prefix_probe.py \
 这里复用先前报告中的同一组 token IDs。先要求 writer 仍命中并实际加载，证明对象存在；
 再要求 reader 外部未命中且无外部加载，才能排除“writer 没写成功”的替代解释。
 配对 miss 验证若没有 `--writer-expect hit`，脚本在推理前拒绝执行。
+实例 B 是 kv_both：首次未命中后会将结果写入自己的命名空间，下一次相同输入可能正常命中。
+重复隔离测试应使用尚未缓存该输入的新 reader 前缀；只重启 B 不会自动删除 Mooncake 中已有对象。
 
 ### 5.4 输入、加载证据与结果
 
@@ -212,6 +242,74 @@ JSON 保存 token IDs、输入指纹、模型名、原始响应、预期结果�
 退出码 0 表示满足本次条件，1 表示请求/校验失败，2 表示参数错误。
 缺失指标、旧日志、本地命中、失败/部分加载不能作为有效命中。
 这些证据仍不能证明发生了物理 SSD 读取或直接 DMA。
+
+### 5.5 两端 kv_both 的 layerwise 验证
+
+前提是安装匹配的 Mooncake Ascend SDK/Master，并具备 session/range API；
+当前分支文档要求 layerwise 使用 Mooncake >=0.3.14。仅有 0.3.11.post1 的普通路径 SDK 不足以完成此验收。
+保持既有模型、TP/DP/PP 与其他兼容配置不变，实例 A 的 kv-transfer-config 改为：
+
+```json
+{
+  "kv_connector": "AscendStoreConnector",
+  "kv_role": "kv_both",
+  "kv_load_failure_policy": "fail",
+  "kv_connector_extra_config": {
+    "backend": "mooncake",
+    "lookup_rpc_port": "0",
+    "use_layerwise": true,
+    "cache_prefix": "model-v1-layerwise"
+  }
+}
+```
+
+实例 B 同样为 kv_both/use_layerwise=true，lookup_rpc_port 使用 "1"。
+两端的附加配置和本地缓存选项如下；已有 additional-config 时合并字段，不覆盖其他设置：
+
+```text
+--additional-config '{"kv_pool_range_debug": true}'
+--no-enable-prefix-caching
+```
+
+日志必须包含实际 worker/rank 输出，并在脚本所在机器上实时可读。
+共享测试使用相同前缀，执行：
+
+```bash
+python tests/e2e/common/kv_pool/cache_prefix_probe.py \
+  --writer-url http://127.0.0.1:8100 \
+  --reader-url http://127.0.0.1:8200 \
+  --writer-model writer-served-name \
+  --reader-model reader-served-name \
+  --mode layerwise \
+  --writer-log /logs/writer.log \
+  --reader-log /logs/reader.log \
+  --expect hit --out layerwise-hit.json
+```
+
+writer 首次 miss 后写入；reader 必须外部 hit、本地命中为零，且本次请求出现
+`[KVPOOL_RANGE_DEBUG]` 的 direction=load 记录。脚本要求每个 range 返回字节数与请求一致，
+并比较两端同权重输出。默认 1536 tokens 若不足以覆盖模型的有效缓存传输粒度，
+应调整 --prompt-tokens，同时满足两端 max_model_len。
+
+隔离测试保留 A，将 B 的前缀改为未使用的 model-v2-layerwise 并由用户重启 B；
+复用上一步报告并先确认 A 的对象仍可命中：
+
+```bash
+python tests/e2e/common/kv_pool/cache_prefix_probe.py \
+  --writer-url http://127.0.0.1:8100 \
+  --reader-url http://127.0.0.1:8200 \
+  --writer-model writer-served-name \
+  --reader-model reader-served-name \
+  --mode layerwise \
+  --writer-log /logs/writer.log \
+  --reader-log /logs/reader-v2.log \
+  --payload layerwise-hit.json --writer-expect hit \
+  --expect miss --out layerwise-isolation.json
+```
+
+本次要求 A 外部 hit 且完成 range 加载，B 外部 miss 且没有 range 加载。
+B 首次 miss 后可以正常向自己的前缀写入，脚本不会自动重试或清理该命名空间。
+完整输出、失败阶段与退出码见 5.4；不要只根据输出文本相同或耗时下降判断缓存命中。
 
 ## 6. 测试建议与优先级
 

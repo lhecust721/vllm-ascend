@@ -164,7 +164,9 @@ The probe also works as a standalone client. It starts no model, master or
 container and changes no serving configuration. Keep both services alive;
 the writer may contribute memory holding the objects being tested.
 
-Use a write-enabled writer. A read-only consumer should have
+Both services can be PD-mixed nodes with `kv_role="kv_both"`: writer and reader
+refer to request order, and both services can query, load and write the pool.
+If choosing a read-only consumer instead, it should have
 `consumer_is_to_load=true`, `consumer_is_to_put=false`, and
 `save_decode_cache=false`. Disable local prefix caching and other test traffic.
 For a hit test, use matching prefixes, compatible model weights/cache layouts,
@@ -217,6 +219,13 @@ Layerwise verification additionally needs `--mode layerwise --writer-log
 <writer-log> --reader-log <reader-log>` and enabled range-debug logging on both
 services. The client must be able to read the live log files, for example by
 running on the A2 host. Bulk mode can run remotely using HTTP alone.
+For complete `kv_both` configuration examples and copyable layerwise hit/miss
+commands, see the [implementation and validation notes](../Design_Documents/mooncake_cache_prefix.md#55-两端-kv_both-的-layerwise-验证).
+The client is committed at
+[`tests/e2e/common/kv_pool/cache_prefix_probe.py`](../../../../tests/e2e/common/kv_pool/cache_prefix_probe.py).
+A `kv_both` reader can publish after its first miss; a repeat isolation test
+needs a reader namespace without that input. Restarting the reader alone does
+not clear objects already stored in Mooncake.
 
 The console shows both generated texts, request durations, metric deltas and
 the verdict. The JSON report also saves token IDs, model names, full responses,
