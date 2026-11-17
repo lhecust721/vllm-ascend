@@ -23,12 +23,20 @@ Memcache/Yuanrong 后端的存取实现保持原样：未配置或空前缀保�
 
 | 项目 | 版本依据 |
 |---|---|
-| 功能分支起点 | `b53996aad5d959f0b4511b4b87aadb2eb425b045`，不代表当前上游最新 main |
+| 原始功能分支起点 | `b53996aad5d959f0b4511b4b87aadb2eb425b045`，保留作历史记录 |
+| 当前 rebase 基线 | `3e9e1869a6c13b943eecdb9b18df9072bc4414dd`，本次拉取的 upstream/main，`[CI] Fix coverage CI (#22202)` |
 | 初版功能 | `75d383213451284368a90e62b190040470218723` |
 | 第一轮验证补强 | `f4914cd0953e6968ee7edc780e801f117995997e` |
 | 已部署服务验证模式 | `9d1a306a27b902841739d6b63d06bc58e54be564`；正向对照修正随本文提交 |
 | 配对上游 vLLM | `.github/vllm-main-verified.commit`：`ba15685ab7f4f5fbed8630bbb7441f8837e76fbe` |
 | 上游语义参考 | PR #45767 手动前缀、PR #65160 自动前缀；#65610 不属于此功能 |
+
+本次 rebase 无冲突，原有六个功能提交全部重放，`git range-diff` 对应补丁均为 `=`。
+表中初版/补强/客户端的旧提交号为 rebase 前历史标识；当前对应提交依次为
+`d74225459`、`6cd7bc507`、`3121db50e`、`5fc43aaca`、`6012762a9`、`a3ddd8e85`。
+本地保留备份分支 `codex/ascend-store-cache-prefix-pre-rebase-a41e7e4e0`。
+新 main 含 DS4.1 shared-KV GVA layerwise 改动，本次保留其实现；不将 Memcache 专用 GVA 能力扩展为 Mooncake 新能力。
+配对 vLLM SHA 和 requirements.txt 未因本次 rebase 改变。
 
 `cache_prefix` 的 key 隔离逻辑在 vLLM/connector 侧实现；Mooncake 按最终 key 存储和查询。
 前缀本身不要求修改 Mooncake SDK。现有 layerwise 数据通道仍要求匹配的 session/range SDK API，
@@ -54,6 +62,8 @@ prefix = str(extra_config.get("cache_prefix", ""))
 
 不额外增加 Ascend 独有的“只接受字符串”校验；推荐用户显式配置字符串，避免误选命名空间。
 Memcache/Yuanrong 在转换后检查是否非空，因此上述非空转换结果同样被拒绝。
+这是与上游一致的 connector 专用配置通道，使用既有 kv_connector_extra_config；
+不新增 Ascend 环境变量或重复的 additional-config 开关。
 
 ### 2.2 自动前缀
 
@@ -345,6 +355,8 @@ A2 的 SDK、Master、驱动、CANN、模型和相关配置必须随结果记录
 |---|---|
 | Windows 核心 CPU/mock 回归（第一轮补强） | 267 passed、189 subtests passed；4 skipped、1 deselected |
 | 共享函数归并后的 Windows CPU/mock 回归 | 271 passed、191 subtests passed；4 skipped、1 deselected；含配对客户端用例 |
+| Rebase 到 3e9e1869a 后的同组回归 | 再次得到 271 passed、191 subtests passed；4 skipped、1 deselected |
+| 新 main 的 hook 分发控制流检查 | 6 passed、10 subtests passed、1 deselected；补齐本地 torch.ones 构造替身，不检验真实张量数据 |
 | 函数归并等价检查 | 移动前后的 apply_cache_prefix/resolve_cache_prefix AST 一致，独立文件已删除，无旧模块导入残留 |
 | 4 个 skip | 真实 vLLM 配置测试；Windows 无依赖时明确跳过，不能计为配置兼容性通过 |
 | 1 个 deselect | 原有 FakeMamba 非 dataclass 限制；A2 真实依赖环境不要沿用排除条件 |
@@ -355,6 +367,11 @@ A2 的 SDK、Master、驱动、CANN、模型和相关配置必须随结果记录
 | 稳定 Node 临时兼容配置的全仓检查 | 因资源和耗时停止，没有完整成功退出结果；未修改仓库 CI 配置 |
 | 全仓 mypy/真实配置单测 | Windows 缺少配对 torch/vLLM；待真实依赖环境执行 |
 | A2 NPU E2E/DSpark/SSD | 待用户部署与执行，未声明通过 |
+
+新 main 的完整 shared-source GVA 数据回环需要真实 CPU torch；本地无 torch 的 bootstrap 不适用。
+首次运行部分新 hook 用例时发现本地替身缺少 torch.ones，补齐构造替身后仅验证无张量内容断言的 hook 分发路径；
+完整 GVA 数据回环及被排除的 full-sparse-sequence 用例仍需在真实依赖环境执行。
+文件删除已检查 CODEOWNERS：没有指向已删除独立模块的规则，kv_pool 父目录所有者规则继续适用。
 
 完整格式检查应在准备好的 A2 Linux 环境执行 `bash format.sh ci`，并单独执行 mypy 和相关 UT。
 ARM64 应准备对应架构的 ShellCheck/Gitleaks、稳定 Node.js >=20 与 npm，避免误用 x86 二进制。

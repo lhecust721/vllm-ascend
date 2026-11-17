@@ -10,12 +10,31 @@ Set `WORK_ROOT` to the parent of your existing `vllm` and `vllm-ascend` checkout
 Check for local changes before switching or updating branches. The following
 commands do not discard local work; resolve a failed fast-forward explicitly.
 
+The feature branch was rebased onto upstream main
+`3e9e1869a6c13b943eecdb9b18df9072bc4414dd`. If your checkout still uses the
+pre-rebase history, create a new local verification branch after fetching:
+
 ```bash
 export WORK_ROOT="$HOME/work/cache-prefix-arm64"
 cd "$WORK_ROOT/vllm-ascend"
 git status --short
 git fetch origin codex/ascend-store-cache-prefix
-git switch codex/ascend-store-cache-prefix
+git switch -c verify-cache-prefix-rebased-20261117 origin/codex/ascend-store-cache-prefix
+git rev-parse HEAD
+```
+
+Choose an unused local branch name. This preserves the old local branch and
+commits; do not force a fast-forward or discard local modifications. The
+commands below are for initial setup or a checkout already following the new
+history. The verified vLLM SHA and pinned requirements did not change in this
+rebase; recheck imports and follow the source-install steps for the new checkout.
+
+```bash
+export WORK_ROOT="$HOME/work/cache-prefix-arm64"
+cd "$WORK_ROOT/vllm-ascend"
+git status --short
+git fetch origin codex/ascend-store-cache-prefix
+# Stay on the verification branch created above, or the rebased feature branch.
 git merge --ff-only origin/codex/ascend-store-cache-prefix
 git rev-parse HEAD
 VLLM_COMMIT="$(tr -d '[:space:]' < .github/vllm-main-verified.commit)"
