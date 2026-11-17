@@ -158,6 +158,66 @@ idle test servers configured with `kv_load_failure_policy="fail"`.
 
 ## Additional acceptance and reporting
 
+### Verify two services deployed by the operator
+
+The probe also works as a standalone client. It starts no model, master or
+container and changes no serving configuration. Keep both services alive;
+the writer may contribute memory holding the objects being tested.
+
+Use a write-enabled writer. A read-only consumer should have
+`consumer_is_to_load=true`, `consumer_is_to_put=false`, and
+`save_decode_cache=false`. Disable local prefix caching and other test traffic.
+For a hit test, use matching prefixes, compatible model weights/cache layouts,
+and the same Mooncake master/tenant. For isolation, configure different prefixes
+on the two services before running and expect a miss.
+
+```bash
+python -m pip install requests prometheus-client
+python tests/e2e/common/kv_pool/cache_prefix_probe.py \
+  --writer-url http://127.0.0.1:8100 \
+  --reader-url http://127.0.0.1:8200 \
+  --writer-model writer-served-name --reader-model reader-served-name \
+  --expect hit --out ./prefix-hit.json
+```
+
+The `--*-model` values are served model names, not local weight paths. URL roots
+and URLs ending in `/v1` are accepted. The default input uses `/tokenize` on both
+servers, checks tokenization agreement, then builds 1536 token IDs shared by
+both requests. A fresh run identifier prevents an earlier run from warming the
+same prompt. No local tokenizer, torch, vLLM or NPU is needed by the client.
+
+Use `--prompt-file <UTF-8-file>` for custom text of at least 512 tokens, or
+`--payload <JSON-token-IDs>` to bypass `/tokenize`. The latter must match both
+models' token vocabulary. Change `--prompt-tokens` for the generated default
+input, and `--max-tokens`/`--seed` for generation. Ensure prompt plus output fits
+both services. `--model` supplies a shared served name instead of two names.
+
+The client sends exactly one inference request to each service. It waits
+`--wait-seconds` (default 5, maximum 60) after the writer; this is a grace
+period, not a PUT completion fence. It never retries reader inference.
+The writer is expected to miss by default; `--writer-expect hit` can validate
+an explicitly prewarmed writer, but does not prove a new PUT occurred.
+
+For different prefixes, change only the reader expectation to `--expect miss`.
+When intentionally using different model weights, add `--skip-output-compare`;
+each model's accuracy still needs its own cold-reference validation.
+For authentication, `--api-key-env <variable-name>` reads a shared key from the
+client environment without saving it in the report.
+
+Layerwise verification additionally needs `--mode layerwise --writer-log
+<writer-log> --reader-log <reader-log>` and enabled range-debug logging on both
+services. The client must be able to read the live log files, for example by
+running on the A2 host. Bulk mode can run remotely using HTTP alone.
+
+The console shows both generated texts, request durations, metric deltas and
+the verdict. The JSON report also saves token IDs, model names, full responses,
+and the stage/error on failure. Exit status 0 means validation passed; 1 means
+validation/request failure; 2 means invalid CLI arguments. Expected hit requires
+lookup and load evidence; expected miss rejects external loading. It cannot
+inspect or change `cache_prefix`, and a hit alone does not prove physical SSD I/O.
+
+### Reset and model-specific acceptance
+
 For bulk reset, populate two prefixes, stop requests and drain all writers,
 then request connector reset through the server's available administration API.
 Both prefixes must miss afterwards. Do not use a local-only cache reset or a
