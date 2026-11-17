@@ -105,6 +105,10 @@ remain part of the key. This does not add support for new model/cache layouts.
 
 - Omitted or `""`: preserve the existing key format and cache hits.
 - A custom string: use it literally as the deployment namespace.
+- Values use the same `str(value)` conversion as upstream MooncakeStore:
+  JSON `null` becomes `"None"`, `false` becomes `"False"`, and `0` becomes `"0"`.
+  These are nonempty namespaces, not aliases for the empty default. Configure
+  a string explicitly to avoid accidental namespace changes.
 - `"auto"`: derive a prefix from `VLLM_IMAGE_TAG` (falling back to
   `VLLM_BUILD_COMMIT`), the upstream model/cache configuration hashes, and the
   resolved HF commit. The default development image tag
@@ -145,6 +149,9 @@ full reset.
 This option is Mooncake-only. Memcache and Yuanrong retain their existing key
 formats with an omitted/empty prefix and reject a nonempty `cache_prefix`,
 including `"auto"`, at startup.
+
+For source updates, A2 setup, CPU checks and two-instance NPU acceptance, see
+the [Mooncake cache-prefix validation guide](../../developer_guide/contribution/mooncake_cache_prefix_validation.md).
 
 ### Configuration Examples
 

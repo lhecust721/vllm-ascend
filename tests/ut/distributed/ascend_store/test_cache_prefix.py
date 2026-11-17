@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import ctypes
 import hashlib
 import json
 import unittest
@@ -8,6 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import numpy as np
 
 import tests.ut.distributed.ascend_store._mock_deps  # noqa: F401
 
@@ -18,8 +21,18 @@ from tests.ut.distributed.ascend_store.test_pool_worker import make_worker
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store import cache_prefix
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.memcache_backend import MemcacheBackend
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.mooncake_backend import MooncakeBackend
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.kv_transfer import (
+    KVCacheStoreRecvingThread,
+    KVCacheStoreSendingThread,
+)
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.layerwise.metadata import LayerPoolKey
-from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import ChunkedTokenDatabase, KeyMetadata, PoolKey
+from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.metadata import (
+    ChunkedTokenDatabase,
+    KeyMetadata,
+    LoadSpec,
+    PoolKey,
+    ReqMeta,
+)
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.pool_scheduler import KVPoolScheduler
 
 
@@ -71,6 +84,18 @@ class TestCachePrefixResolution(unittest.TestCase):
                 with self.subTest(backend=backend, prefix=prefix), self.assertRaisesRegex(ValueError, "only.*Mooncake"):
                     cache_prefix.resolve_cache_prefix(config)
             self.assertEqual(cache_prefix.resolve_cache_prefix(config_for("", backend)), "")
+        self.hash_factors.assert_not_called()
+
+    def test_upstream_string_coercion_and_omitted_default(self):
+        for value, expected in ((None, "None"), (False, "False"), (0, "0"), ([], "[]"), ({}, "{}")):
+            with self.subTest(value=value):
+                self.assertEqual(cache_prefix.resolve_cache_prefix(config_for(value)), expected)
+                for backend in ("memcache", "yuanrong"):
+                    with self.assertRaisesRegex(ValueError, "only.*Mooncake"):
+                        cache_prefix.resolve_cache_prefix(config_for(value, backend))
+        config = config_for()
+        del config.kv_transfer_config.kv_connector_extra_config["cache_prefix"]
+        self.assertEqual(cache_prefix.resolve_cache_prefix(config), "")
         self.hash_factors.assert_not_called()
 
     def test_auto_factors_and_image_precedence(self):
@@ -240,3 +265,112 @@ class TestCachePrefixKeys(unittest.TestCase):
             worker.reset_store()
             worker.kv_send_thread.request_queue.join.assert_called_once_with()
             backend.store.remove_all.assert_called_once_with(force=True)
+
+
+class ByteStore:
+    """CPU stand-in for the Mooncake SDK's scatter/gather storage boundary."""
+
+    requires_exists_before_put = True
+
+    def __init__(self):
+        self.objects = {}
+        self.calls = {"exists": [], "put": [], "get": []}
+
+    def set_device(self):
+        pass
+
+    def exists(self, keys):
+        self.calls["exists"].extend(keys)
+        return [int(key in self.objects) for key in keys]
+
+    def put(self, keys, addrs, sizes):
+        self.calls["put"].extend(keys)
+        for key, row, lengths in zip(keys, addrs, sizes, strict=True):
+            self.objects[key] = [ctypes.string_at(addr, size) for addr, size in zip(row, lengths, strict=True)]
+        return [True] * len(keys)
+
+    def get(self, keys, addrs, sizes):
+        self.calls["get"].extend(keys)
+        for key, row, lengths in zip(keys, addrs, sizes, strict=True):
+            for addr, size, data in zip(row, lengths, self.objects[key], strict=True):
+                assert len(data) == size
+                ctypes.memmove(addr, data, size)
+        return [0] * len(keys)
+
+    def remove_all(self, *, force):
+        assert force is True
+        self.objects.clear()
+
+    # Mirror the SDK boundary so the actual MooncakeBackend also participates.
+    batch_is_exist = exists
+    batch_get_into_multi_buffers = get
+
+    def batch_put_from_multi_buffers(self, keys, addrs, sizes, config):
+        return [0 if value else -1 for value in self.put(keys, addrs, sizes)]
+
+
+class TestCachePrefixBulkRoundtrip(unittest.TestCase):
+    def test_lookup_put_get_and_global_reset(self):
+        # Run real worker lookup and send/receive handlers against CPU bytes.
+        # Separate arrays and remapped destination blocks prevent local reuse
+        # from hiding a wrong namespace or an incorrect scatter/gather offset.
+        store = ByteStore()
+        backend = MooncakeBackend.__new__(MooncakeBackend)
+        backend._store_initialized, backend.store = True, store
+        backend._lazy_init = False
+        backend._prefetch_conf = SimpleNamespace(enabled=False)
+        backend.config = SimpleNamespace(preferred_segment=False, prefer_alloc_in_same_node=True)
+        hashes = [b"h0", b"h1"]
+        for prefix in ("", "release-v1", "release-v2"):
+            with self.subTest(prefix=prefix):
+                worker = make_worker(self, extra_config={"cache_prefix": prefix})
+                source = np.arange(48, dtype=np.uint8).reshape(3, 16)
+                target = np.full_like(source, 255)
+                writer_db = ChunkedTokenDatabase(worker.metadata, [16], None)
+                reader_db = ChunkedTokenDatabase(worker.metadata, [16], None)
+                for db, array in ((writer_db, source), (reader_db, target)):
+                    db.set_group_buffers({0: [array.ctypes.data]}, {0: [16]}, {0: [16]}, group_num_layers={0: 1})
+                worker.token_database = reader_db
+                worker.m_store = backend
+                self.assertEqual(worker.lookup(32, hashes), 0)
+                sender = KVCacheStoreSendingThread(backend, writer_db, 16, 0, group_uses_align_state=[False])
+                request = ReqMeta(req_id="write", token_len_chunk=32, block_ids=[1, 2], block_hashes=hashes)
+                sender.add_stored_request(request)
+                sender.request_queue.put(request)
+                sender._handle_request(request)
+                self.assertEqual(sender.request_queue.unfinished_tasks, 0)
+                self.assertFalse(sender.save_disabled.is_set())
+                self.assertEqual(worker.lookup(32, hashes), 32)
+                receiver = KVCacheStoreRecvingThread(backend, reader_db, 16, 0)
+                load = ReqMeta(
+                    req_id="read",
+                    token_len_chunk=32,
+                    block_ids=[2, 1],
+                    block_hashes=hashes,
+                    load_spec=LoadSpec(vllm_cached_tokens=0, kvpool_cached_tokens=32, can_load=True, token_len=32),
+                )
+                receiver.request_queue.put(load)
+                receiver._handle_request(load)
+                self.assertFalse(receiver._invalid_block_ids)
+                np.testing.assert_array_equal(target[[2, 1]], source[1:])
+                self.assertTrue(np.all(target[0] == 255))
+                expected = list(store.calls["put"][-2:])
+                self.assertEqual(expected, [reader_db._make_key_by_hash(value.hex()).to_string() for value in hashes])
+                self.assertEqual(store.calls["get"][-2:], expected)
+                self.assertTrue(all(key in store.calls["exists"] for key in expected))
+                self.assertTrue(all(key.startswith(prefix + "@") for key in expected) if prefix else True)
+        self.assertEqual(len(store.objects), 6)
+        worker.m_store = backend
+        worker.kv_send_thread = MagicMock()
+        worker.reset_store()
+        self.assertEqual(store.objects, {})
+
+    def test_other_backend_empty_and_omitted_keep_bulk_keys(self):
+        for backend in ("memcache", "yuanrong"):
+            for extra in ({"backend": backend}, {"backend": backend, "cache_prefix": ""}):
+                worker = make_worker(self, extra_config=extra)
+                self.assertEqual(worker.cache_prefix, "")
+                self.assertEqual(
+                    worker.token_database._get_key_prefix(0),
+                    "llama-7b@dcp:0@head_or_tp_rank:0@pp_rank:0@group:0@cache_role:kv@cache_family:default@",
+                )

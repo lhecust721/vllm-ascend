@@ -20,6 +20,7 @@ def resolve_cache_prefix(vllm_config: VllmConfig, kv_cache_config: KVCacheConfig
     """Resolve once before Store setup; empty namespaces preserve existing keys."""
     transfer_config = getattr(vllm_config, "kv_transfer_config", None)
     extra_config = transfer_config.kv_connector_extra_config if transfer_config is not None else {}
+    # Keep upstream MooncakeStore's coercion, including None -> "None".
     prefix = str(extra_config.get("cache_prefix", ""))
     if not prefix:
         return ""
