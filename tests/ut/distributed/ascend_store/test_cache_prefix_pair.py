@@ -74,6 +74,15 @@ class TestPairedCachePrefixCLI(unittest.TestCase):
             reader = stack.enter_context(fake_service("reader", namespace, objects, calls))
             directory = stack.enter_context(tempfile.TemporaryDirectory())
             out = Path(directory) / "report.json"
+            control_args = []
+            if expect == "miss":
+                # Isolation requires a known resident input in the writer's
+                # namespace, not merely a cold writer's successful response.
+                tokens = [1] * 1536
+                objects.add(("v1", tuple(tokens)))
+                prior = Path(directory) / "hit-report.json"
+                prior.write_text(json.dumps({"prompt_token_ids": tokens}), encoding="utf-8")
+                control_args = ["--writer-expect", "hit", "--payload", str(prior)]
             result = subprocess.run(
                 [
                     sys.executable,
@@ -92,6 +101,7 @@ class TestPairedCachePrefixCLI(unittest.TestCase):
                     "0",
                     "--out",
                     str(out),
+                    *control_args,
                 ],
                 capture_output=True,
                 text=True,
@@ -104,7 +114,7 @@ class TestPairedCachePrefixCLI(unittest.TestCase):
         self.assertEqual(len(calls[0][1]["prompt"]), 1536)
         self.assertEqual(calls[0][1]["model"], "writer-model")
         self.assertEqual(calls[1][1]["model"], "reader-model")
-        self.assertEqual(report["writer"]["metrics_delta"]["external_hits"], 0)
+        self.assertEqual(report["writer"]["metrics_delta"]["external_hits"] > 0, expect == "miss")
         self.assertIn("same-weight deterministic output", result.stdout)
         return result, report
 
@@ -129,3 +139,26 @@ class TestPairedCachePrefixCLI(unittest.TestCase):
             path.write_text(json.dumps([1] * 512), encoding="utf-8")
             args = type("Args", (), {"payload": path})()
             self.assertEqual(probe.pair_tokens(args, "writer", "reader", {}), [1] * 512)
+
+    def test_isolation_requires_a_writer_hit_positive_control(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    probe.__file__,
+                    "--writer-url",
+                    "http://127.0.0.1:1",
+                    "--reader-url",
+                    "http://127.0.0.1:2",
+                    "--expect",
+                    "miss",
+                    "--out",
+                    str(Path(directory) / "report.json"),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("positive control", result.stderr)

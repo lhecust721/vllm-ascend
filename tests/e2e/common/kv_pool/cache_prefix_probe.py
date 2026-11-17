@@ -186,7 +186,8 @@ def tokenize(url: str, model: str, text: str, headers: dict[str, str] | None = N
 
 def pair_tokens(args, writer_model: str, reader_model: str, headers: dict[str, str]) -> list[int]:
     if args.payload:
-        return json.loads(args.payload.read_text(encoding="utf-8"))
+        payload = json.loads(args.payload.read_text(encoding="utf-8"))
+        return payload["prompt_token_ids"] if isinstance(payload, dict) else payload
     custom = args.prompt is not None or args.prompt_file is not None
     text = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else args.prompt
     if not custom:
@@ -272,7 +273,7 @@ def verify_pair(args) -> tuple[dict, int]:
 
 
 def pair_summary(record: dict) -> dict:
-    summary = {name: record[name] for name in ("status", "stage", "reader_expected")}
+    summary = {name: record[name] for name in ("status", "stage", "writer_expected", "reader_expected")}
     summary["error"] = record.get("error")
     summary["prompt_tokens"] = record.get("prompt_tokens")
     for name in ("writer", "reader"):
@@ -295,7 +296,7 @@ def main() -> None:
     endpoint.add_argument("--writer-url", help="paired test: already deployed writer root URL or /v1")
     parser.add_argument("--reader-url", help="paired test: already deployed fresh/read-only reader")
     inputs = parser.add_mutually_exclusive_group()
-    inputs.add_argument("--payload", type=Path, help="JSON integer token IDs; bypass /tokenize")
+    inputs.add_argument("--payload", type=Path, help="JSON token IDs or prior paired report; bypass /tokenize")
     inputs.add_argument("--prompt-file", type=Path, help="UTF-8 text, at least 512 tokens; paired test only")
     inputs.add_argument("--prompt", help="text, at least 512 tokens; paired test only")
     parser.add_argument("--out", required=True, type=Path)
@@ -323,6 +324,8 @@ def main() -> None:
             parser.error("require 0 <= --wait-seconds <= 60, --prompt-tokens >= 512 and --max-tokens > 0")
         if args.mode == "layerwise" and (args.writer_log is None or args.reader_log is None):
             parser.error("layerwise paired mode requires --writer-log and --reader-log")
+        if args.expect == "miss" and args.writer_expect != "hit":
+            parser.error("isolation needs a positive control: reuse --payload <hit-report> with --writer-expect hit")
         record, code = verify_pair(args)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")

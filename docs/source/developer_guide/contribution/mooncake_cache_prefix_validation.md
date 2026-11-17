@@ -187,7 +187,7 @@ both requests. A fresh run identifier prevents an earlier run from warming the
 same prompt. No local tokenizer, torch, vLLM or NPU is needed by the client.
 
 Use `--prompt-file <UTF-8-file>` for custom text of at least 512 tokens, or
-`--payload <JSON-token-IDs>` to bypass `/tokenize`. The latter must match both
+`--payload <JSON-token-IDs-or-prior-report>` to bypass `/tokenize`. The latter must match both
 models' token vocabulary. Change `--prompt-tokens` for the generated default
 input, and `--max-tokens`/`--seed` for generation. Ensure prompt plus output fits
 both services. `--model` supplies a shared served name instead of two names.
@@ -198,7 +198,16 @@ period, not a PUT completion fence. It never retries reader inference.
 The writer is expected to miss by default; `--writer-expect hit` can validate
 an explicitly prewarmed writer, but does not prove a new PUT occurred.
 
-For different prefixes, change only the reader expectation to `--expect miss`.
+For different prefixes, reuse the successful hit report as input and require a
+writer hit as a positive control:
+
+```text
+--payload ./prefix-hit.json --writer-expect hit --expect miss --out ./prefix-miss.json
+```
+
+The client rejects a paired miss test without `--writer-expect hit`: a reader
+miss alone cannot distinguish isolation from missing writer objects. Keep the
+writer and the first test's objects alive while reconfiguring the reader.
 When intentionally using different model weights, add `--skip-output-compare`;
 each model's accuracy still needs its own cold-reference validation.
 For authentication, `--api-key-env <variable-name>` reads a shared key from the
