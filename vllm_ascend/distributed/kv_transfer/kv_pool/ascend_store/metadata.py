@@ -54,7 +54,7 @@ def resolve_cache_prefix(vllm_config: VllmConfig, kv_cache_config: KVCacheConfig
     # modifying either runtime config or including scheduling capacities.
     cache = copy(vllm_config.cache_config)
     if kv_cache_config is not None and kv_cache_config.kv_cache_groups:
-        block_sizes = []
+        block_sizes: list[int] = []
         for group in kv_cache_config.kv_cache_groups:
             spec = group.kv_cache_spec
             specs = spec.kv_cache_specs.values() if isinstance(spec, UniformTypeKVCacheSpecs) else (spec,)

@@ -1,6 +1,7 @@
 # Mooncake cache_prefix：mypy `var-annotated` 说明（背景 / 触发原因 / 修复建议）
 
 - 记录日期：2026-11-18
+- 修复状态（2026-11-18）：第 6 节的三处类型标注已落实到代码；下文错误输出为修复前 `b48591145` 的历史记录。后续验收步骤见 [后续验证清单](mooncake_cache_prefix_validation_followup.md)。
 - 基线：分支 `codex/ascend-store-cache-prefix`，提交 `b48591145`（`docs(kvpool): record main rebase and validation`）
 - 触发场景：在 A2 Linux 真实依赖环境执行全仓 mypy（`tools/mypy.sh`，mypy 1.11.1，Python 3.12）
 - 结论：全仓 mypy 报告 3 处 `var-annotated`（`Need type annotation`），**均由 cache_prefix 功能新增代码/测试引入**，属**静态类型标注缺失**，不影响运行时行为与功能正确性。
@@ -9,7 +10,7 @@
 
 功能分支相对 rebase 基线 `3e9e1869a`（upstream/main）新增了 7 个提交：
 
-```
+```text
 d74225459 feat(kvpool): add Mooncake deployment cache prefixes
 6cd7bc507 test(kvpool): strengthen Mooncake cache prefix validation
 3121db50e test(kvpool): verify operator-deployed cache pool services
@@ -34,6 +35,7 @@ b48591145 docs(kvpool): record main rebase and validation
 `var-annotated`（`Need type annotation for "..."`）是 mypy 的**类型标注完备性**检查：当变量由**空容器字面量**（`[]` / `{}`）或**异构字面量集合**初始化、且 mypy 无法从上下文稳定推断其（元素）类型时，会要求显式标注。
 
 触发条件叠加：
+
 - 仓库 `tools/mypy.sh` 使用 `--check-untyped-defs`；
 - `mypy.ini` 仅 `disable_error_code = annotation-unchecked`，**未禁用** `var-annotated`；
 - 因此全仓 mypy 会对上述三处报错。这与运行时无关——代码实际执行完全正常。
@@ -115,7 +117,7 @@ mypy --follow-imports skip --check-untyped-defs --python-version 3.12 \
 
 期望当前输出（`b48591145`）：
 
-```
+```text
 metadata.py:57: error: Need type annotation for "block_sizes" ... [var-annotated]
 test_cache_prefix_config.py:57: error: Need type annotation for "value" [var-annotated]
 test_cache_prefix.py:277: error: Need type annotation for "calls" [var-annotated]
@@ -126,8 +128,8 @@ test_cache_prefix.py:277: error: Need type annotation for "calls" [var-annotated
 ## 5. 说明与边界
 
 - **非运行时缺陷**：三处均为类型标注完备性问题；cache_prefix 功能的 E2E（普通路径 P0、layerwise 同/异前缀、auto 身份改变隔离、全量 reset）与真实配置/特性单测（39 passed）均已通过，与本问题无关。
-- **与“环境噪声”区分**：全仓 mypy 在沙箱中还产生大量 `import-not-found` / `import-untyped` / 测试 monkeypatch 的 `method-assign` 等，属 editable 安装与 `--follow-imports skip` 造成的假阳性，以及生成目录 `_cann_ops_custom` 的产物错误；评估全仓 mypy 时应排除这些，聚焦真实源码问题。
-- **是否阻塞 CI**：取决于仓库是否在 CI 运行严格全仓 mypy；若运行，修复上述三处即可消除这类 `var-annotated`。
+- **与环境问题区分**：缺失依赖或 editable 路径解析可能造成部分错误；不能据此将所有 `import-untyped`、`attr-defined`、`method-assign` 或生成代码错误判为假阳性。应先对齐依赖，再用相同环境和参数比较 upstream 基线与功能分支，逐项归因。
+- **是否阻塞 CI**：当前 `.github/workflows/pr_test.yaml` 明确调用 `run_mypy_parallel.py`，检查 Python 3.10、3.11、3.12 三组规则。三处标注缺失应修复；修复不代表全仓 mypy 已通过，仍须完成矩阵复核。
 
 ## 6. 建议的最小改动汇总
 

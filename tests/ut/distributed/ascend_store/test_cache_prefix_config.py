@@ -54,7 +54,8 @@ class TestRealCachePrefixConfig(unittest.TestCase):
         self.addCleanup(env.stop)
 
     def test_upstream_parity_for_literal_conversion_and_auto(self):
-        for value in ("", "custom", "AUTO", None, False, 0, [], {}, "auto"):
+        values: tuple[object, ...] = ("", "custom", "AUTO", None, False, 0, [], {}, "auto")
+        for value in values:
             with self.subTest(value=value):
                 config = make_config(self.model_path, value)
                 self.assertEqual(resolve_cache_prefix(config), _resolve_cache_prefix(config))

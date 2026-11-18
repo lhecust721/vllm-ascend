@@ -274,7 +274,7 @@ class ByteStore:
 
     def __init__(self):
         self.objects = {}
-        self.calls = {"exists": [], "put": [], "get": []}
+        self.calls: dict[str, list[str]] = {"exists": [], "put": [], "get": []}
 
     def set_device(self):
         pass
