@@ -3,13 +3,13 @@
 - 报告日期：2026-11-18
 - 被测特性：`lhecust721/vllm-ascend` `codex/ascend-store-cache-prefix` 部署级 `cache_prefix`（Mooncake 普通路径 + layerwise 路径）
 - 参考文档：`docs/source/developer_guide/Design_Documents/mooncake_cache_prefix.md`（b48591145）及 Mooncake `kv-cache-sharing-and-isolation.md`
-- 测试范围：普通（bulk）路径 P0、layerwise 同/异前缀、auto 身份改变隔离、全量 reset。SSD 物理读取 / 性能 / DSV4.1+DSpark 未纳入本次（见第 6 节）
+- 测试范围：普通（bulk）路径 P0、layerwise 同/异前缀、auto 身份改变隔离、全量 reset、DSV4.1+DSpark（经 SSD 持久化的跨进程验证，见第 8 节）。SSD 物理读取/DMA、性能与长稳 未纳入本次（见第 6 节）
 
 ## 1. 测试目标与结论摘要
 
 验证在共享 Mooncake 池内，`cache_prefix` 能实现「同前缀复用、不同前缀隔离、空/auto 语义正确、auto 身份改变隔离、非 Mooncake 后端受保护、全量 reset 清理」，并在 layerwise 数据平面下同样成立。
 
-结论：普通路径 P0、layerwise 同/异前缀、auto 身份改变隔离、全量 reset 均通过。A2 实机、双实例同 Pod、真实 Qwen3-30B-A3B 推理下，跨实例外部命中与加载、命名空间隔离、空/auto 语义、身份缺失失败路径、身份改变隔离、全量清理均符合文档预期。
+结论：普通路径 P0、layerwise 同/异前缀、auto 身份改变隔离、全量 reset、DSV4.1+DSpark 场景均通过。A2 实机、真实 Qwen3-30B-A3B（双实例同 Pod）与 DeepSeek-V4.1-Flash（DP2×TP4+EP8 单机）推理下，跨实例外部命中与加载、命名空间隔离、空/auto 语义、身份缺失失败路径、身份改变隔离、全量清理、以及经 SSD 持久化的跨进程复用均符合文档预期。
 
 | 用例 | 结果 |
 |---|---|
@@ -24,6 +24,7 @@
 | LW-T2 layerwise 异前缀隔离（含正向对照） | 通过（附过程注意点 4A.3） |
 | T5 auto 身份改变隔离（bulk） | 通过（附过程观察 4B.2） |
 | T6 全量 reset（bulk） | 通过 |
+| DSV4.1 + DSpark（同/异前缀，SSD 持久化跨进程） | 通过（见第 8 节） |
 
 ## 2. 环境与版本
 
@@ -149,7 +150,7 @@ layerwise 加载证据改为实时日志 `[KVPOOL_RANGE_DEBUG]` `direction=load`
 | auto 身份改变隔离（T5） | 已完成 | 见 4B |
 | 全量 reset（T6） | 已完成 | layerwise 外部 reset 仍不支持 |
 | SSD 副本 / 物理读取 | 扩展 | 内存层通过后单独验证；本次证据不能证明物理 SSD 读取或 DMA |
-| DSV4.1 + DSpark | P1 | 现有 target/draft/TP/DP/PP 配置 |
+| DSV4.1 + DSpark（同/异前缀） | 已完成 | 见第 8 节；单机需顺序执行 + SSD 落盘 |
 | 性能与长稳 | P2 | 同环境对比空/手动/auto，记录 key 生成 CPU 开销与延迟 |
 
 ## 7. 产物清单（容器 `/workspace/`）
@@ -157,7 +158,34 @@ layerwise 加载证据改为实时日志 `[KVPOOL_RANGE_DEBUG]` `direction=load`
 - 普通路径：`prefix-hit.json`、`prefix-miss.json`、`prefix-empty-hit.json`、`prefix-auto-hit.json`、`final-auto-hit.json`
 - layerwise：`layerwise-hit.json`、`layerwise-A-selfhit.json`、`layerwise-isolation.json`、`payload-t1.json`
 - auto/reset：`auto-id-hit.json`、`auto-A-selfhit.json`、`auto-id-isolation.json`、`auto-p1.json`、`reset-A-miss.json`、`reset-B-miss.json`、`reset_client.py`、`mk_payload.py`、`mk_p2.py`
+- DSV4.1+DSpark：`dsv4-cold.json`、`dsv4-ssd-hit.json`、`dsv4-v2-miss.json`、`dsv4-restored-hit.json`、`dsv4-repeat.json`、`dsv4-payload.json`、`dsv41_mix_v2.sh`、`dsv4_filler.py`、`dsv4_mkpayload.py`
 - 脚本备份：`qwen3_30B_A3B_mix.sh.bak.kvconsumer`、`qwen3_30B_A3B_mix2.sh.bak.kvconsumer`
 - 日志：`/workspace/vllm.log`、`/workspace/vllm2.log`（DEBUG，含 `[KVPOOL_RANGE_DEBUG]`）
 
-报告生成时状态：A（8195）/B（8196）均为 bulk、`kv_both`、`cache_prefix:auto`（A=X，B=Y），`/health` 均 200；已执行一次全量 reset 并验证两命名空间失效。
+报告生成时状态：A（8195）/B（8196）均为 bulk、`kv_both`、`cache_prefix:auto`（A=X，B=Y），`/health` 均 200；已执行一次全量 reset 并验证两命名空间失效。（DSV4.1+DSpark 段时的状态见第 8 节。）
+
+## 8. DSV4.1 + DSpark 场景验证（实机）
+
+环境：DeepSeek-V4.1-Flash-w4a8-Ascend，DP2×TP4（EP8）8×910B3 单机；DSpark `--speculative-config '{"method":"dspark","num_speculative_tokens":3,"enforce_eager":true}'`；`kv_both`、bulk（`use_layerwise:false`）、`cache_prefix:"dsv41-target-r2-dspark-r2"`（隔离用 `...-alt`）。Mooncake master HA（`mooncake-master-0/1` + etcd），SSD 卸载开启（client `rank_*` @ `/data1/mooncakenvme`）。
+
+约束：该模型需 EP8（8 卡）才放得下；拆成 2×(TP4,EP4) 触发 `NPU out of memory`，故同机无法 A/B 双实例并存。采用**单实例顺序 + SSD 持久化**验证。
+
+步骤与证据（清 SSD → 重启 → 打流量落盘 → 跨进程/隔离）：
+
+| 步骤 | 操作 | 证据 |
+|---|---|---|
+| 0 | 清 `/data1/mooncakenvme` | 13G→0 |
+| 1 | 冷写目标 P（1536 token，uuid） | miss（hits=0）；DSpark `drafts=4 / draft_tokens=12 / accepted=12` |
+| 2 | 灌流量（约 74 次 ×8000 token 各不相同的 prompt）触发 SSD 批量落盘 | `rank_*` 0→184.9MB→1478.8MB（过 256MB/500key 阈值，P 随批落盘） |
+| 3 | 停写者 → 重启同前缀 v1 → 请求 P | 跨进程 HIT：`external_hits=1408, bulk_get_keys=44, local_hits=0`，输出=冷算，DSpark `drafts=4/accepted=12` |
+| 4 | 重启异前缀 v2（`...-alt`）→ 请求 P | 隔离 MISS：`external_hits=0, bulk_get_keys=0`；`rank_*=177MB/rank` 仍在（v1 数据在 SSD，作正向对照） |
+| 5 | 恢复 v1 → 请求 P | 再次 HIT（`external_hits=1408, load=44`），可复现 |
+
+结论：
+- 同前缀：DSV4.1+DSpark 目标 KV 写入 Mooncake store，经 SSD 持久化后，**写实例删除/重启仍可被新实例跨进程外部命中并加载**；DSpark draft 在冷算与命中路径均执行，输出一致。
+- 异前缀：key 命名空间隔离成立（miss 且无加载），并具备正向对照（v1 数据仍在 SSD）。
+- 环境要点：热 KV 需流量达到 256MB/500key 才批量落 SSD；小流量仅存 DRAM，实例删除即丢失（先前的顺序 miss 即由此产生）；模型需 EP8，故同机顺序执行 + SSD 方案是可行路径。
+
+补充证据：同实例内跨 DP 引擎外部命中（`dsv4-repeat.json`，`external_hits=1408`、`bulk_get_keys=44`、`local_hits=0`）。
+
+DSV4 段结束时状态：原始 v1 实例（8700，`dsv41_mix.sh`）运行中，`/health` 200；SSD `rank_*` 各约 177MB 持久保留。
