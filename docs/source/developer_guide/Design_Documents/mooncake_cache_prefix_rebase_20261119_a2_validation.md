@@ -14,7 +14,7 @@
 | 普通路径 E2E（4 卡） | T1 同前缀命中、T2 异前缀隔离 均通过 |
 | layerwise E2E（PR#21314 复验，4 卡） | LW-T1 同前缀 range 加载、LW-T2 异前缀隔离 均通过（含 writer 正向 range 对照） |
 | UT 回归 | 真实配置 4 passed（含注册 shim）；回归组 271 passed；layerwise/hybrid 34 passed |
-| `format.sh ci` | 除 gitleaks 外全部 Passed（gitleaks 为 ARM64 二进制环境问题） |
+| `format.sh ci` | 除 gitleaks 钩子外全部 Passed（OBS ARM64 二进制崩溃）；已用源码编译 gitleaks 做等价范围扫描：no leaks |
 | 全仓 mypy 矩阵（3.10/3.11/3.12） | 均 exit=1，但 2274 行 error 中 2259 行在生成的 `_cann_ops_custom`；cache_prefix 三文件 0 error |
 
 ## 2. 被测代码与环境
@@ -99,9 +99,13 @@
 
 日志：`/workspace/format_ci_latest.log`。`--fix` 仅改动 `mooncake_cache_prefix_test_report.md` 与 `static_checks_mypy_ut_validation.md`（文档），代码树保持不变（HEAD `7f75916c5`）。
 
-### 7.2 gitleaks 说明
-- OBS 预编译 gitleaks 在本机（aarch64）崩溃；GitHub Release 的 arm64 包在本环境下载极慢且多次截断，未能获得可用二进制。
-- 因此 `gitleaks detect --log-opts=f3fd3001..HEAD` 未能在本地完成；建议在具备可用 ARM64 gitleaks 的 CI 环境执行提交范围扫描。
+### 7.2 gitleaks 说明与等价扫描
+- 仓库 `format.sh ci` 的 gitleaks 钩子仍失败：脚本从 OBS 下载的 aarch64 预编译二进制运行即 `fatal error: lfstack.push`（环境/二进制崩溃）；GitHub Release 的 arm64 包在本环境下载极慢且多次截断。
+- 改用「源码编译」获得可用 gitleaks：Go 1.27.4 + aliyun GOPROXY 构建 `github.com/zricethezav/gitleaks/v8@v8.28.0`，安装到 `/usr/local/bin/gitleaks`。
+- 等价提交范围扫描（v8.28 使用 `git` 子命令）：
+  `gitleaks git --config .gitleaks.toml --redact --log-opts "f3fd3001ddb43093d6b6478175f78a13b86e21a4..HEAD" .`
+  结果：**13 commits scanned，~163.69 KB，no leaks found，exit 0**。
+- 说明：v8.28 已移除 `detect/protect` 子命令（改用 `git/dir`），仓库钩子脚本需相应更新；本次以等价范围扫描证明该提交范围未发现密钥泄漏。
 
 ## 8. 观察与边界
 
