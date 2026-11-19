@@ -1,9 +1,10 @@
 # Mooncake cache_prefix：实现思路、修改点与测试建议
 
-记录日期：2026-11-17。
+记录日期：2026-11-17；最近 rebase 更新：2026-11-19。
 本文说明 `lhecust721/vllm-ascend` 的 `codex/ascend-store-cache-prefix` 功能分支，
 覆盖当前实现，包括两端 kv_both、layerwise 验证及共享函数归并。
-精确版本以包含本文的 Git 提交为准；测试记录不代表 A2 NPU 验收已经完成。
+精确版本以包含本文的 Git 提交为准；历史 A2 结果见 [实机测试报告](mooncake_cache_prefix_test_report.md)，
+最新 main 的冲突处理和验证边界见 [2026-11-19 rebase 记录](mooncake_cache_prefix_rebase_20261119.md)。
 
 ## 1. 目标、范围与版本
 
@@ -24,19 +25,20 @@ Memcache/Yuanrong 后端的存取实现保持原样：未配置或空前缀保�
 | 项目 | 版本依据 |
 |---|---|
 | 原始功能分支起点 | `b53996aad5d959f0b4511b4b87aadb2eb425b045`，保留作历史记录 |
-| 当前 rebase 基线 | `3e9e1869a6c13b943eecdb9b18df9072bc4414dd`，本次拉取的 upstream/main，`[CI] Fix coverage CI (#22202)` |
+| 当前 rebase 基线 | `f3fd3001ddb43093d6b6478175f78a13b86e21a4`，2026-11-19 拉取的 upstream/main，`[Doc] Remove incorrect ASCEND_VISIBLE_DEVICES from LMCache guide (#22092)` |
 | 初版功能 | `75d383213451284368a90e62b190040470218723` |
 | 第一轮验证补强 | `f4914cd0953e6968ee7edc780e801f117995997e` |
 | 已部署服务验证模式 | `9d1a306a27b902841739d6b63d06bc58e54be564`；正向对照修正随本文提交 |
 | 配对上游 vLLM | `.github/vllm-main-verified.commit`：`ba15685ab7f4f5fbed8630bbb7441f8837e76fbe` |
 | 上游语义参考 | PR #45767 手动前缀、PR #65160 自动前缀；#65610 不属于此功能 |
 
-本次 rebase 无冲突，原有六个功能提交全部重放，`git range-diff` 对应补丁均为 `=`。
-表中初版/补强/客户端的旧提交号为 rebase 前历史标识；当前对应提交依次为
+2026-11-17 rebase 到 `3e9e1869a` 时无冲突，原有六个功能提交全部重放，`git range-diff` 对应补丁均为 `=`。
+表中初版/补强/客户端的旧提交号为 rebase 前历史标识；该次重放对应提交依次为
 `d74225459`、`6cd7bc507`、`3121db50e`、`5fc43aaca`、`6012762a9`、`a3ddd8e85`。
 本地保留备份分支 `codex/ascend-store-cache-prefix-pre-rebase-a41e7e4e0`。
-新 main 含 DS4.1 shared-KV GVA layerwise 改动，本次保留其实现；不将 Memcache 专用 GVA 能力扩展为 Mooncake 新能力。
-配对 vLLM SHA 和 requirements.txt 未因本次 rebase 改变。
+2026-11-19 再次重放了全部 12 个分支提交，解决 layerwise 导入区一处冲突，并适配上游移动后的 partial-key 测试接口。
+上游 PR #21314 的数据平面重构完整保留；不将 Memcache 专用 GVA 能力扩展为 Mooncake 新能力。
+配对 vLLM SHA 和 requirements.txt 未因这两次 rebase 改变；本次上游包含原生算子改动，A2 更新需重新构建安装 vllm-ascend。
 
 `cache_prefix` 的 key 隔离逻辑在 vLLM/connector 侧实现；Mooncake 按最终 key 存储和查询。
 前缀本身不要求修改 Mooncake SDK。现有 layerwise 数据通道仍要求匹配的 session/range SDK API，

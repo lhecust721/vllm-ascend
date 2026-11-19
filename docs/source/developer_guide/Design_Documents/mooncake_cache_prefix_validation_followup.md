@@ -2,6 +2,9 @@
 
 更新日期：2026-11-18。评审对象为 `b48591145` 的 A2 测试及随后上传的三份报告；本次代码修复建立在 `7d26fd264` 上。
 
+2026-11-19 补充：远端 `3f1deadf9` 已增加 DSV4.1+DSpark bulk 实机结果，见 [功能报告](mooncake_cache_prefix_test_report.md) 第 8 节。
+下文为 2026-11-18 时点的待办；新的上游数据平面重构尚需 A2 复验，见 [最新 rebase 记录](mooncake_cache_prefix_rebase_20261119.md)。
+
 关联记录：
 
 - [A2 功能测试报告](mooncake_cache_prefix_test_report.md)

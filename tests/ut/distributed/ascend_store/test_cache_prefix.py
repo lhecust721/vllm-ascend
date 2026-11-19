@@ -215,7 +215,7 @@ class TestCachePrefixKeys(unittest.TestCase):
             vllm_config=config, kv_cache_config=None, model_name="model", use_hybrid=False, grouped_block_size=[16]
         )
         self.assertEqual(builder.make_full_key(0, "hash", 0, 0), "model@hash@0")
-        self.assertEqual(MemcacheBackend.make_partial_key("model", "r1", 0, 1, 16, 0), "model@partial@r1@0@1@16@0")
+        self.assertEqual(builder.make_partial_key("model", "r1", 0, 1, 16, 0), "model@partial@r1@0@1@16@0")
         for backend in ("memcache", "yuanrong"):
             for prefix in ("v1", "auto"):
                 with self.subTest(backend=backend, prefix=prefix), self.assertRaisesRegex(ValueError, "only.*Mooncake"):
